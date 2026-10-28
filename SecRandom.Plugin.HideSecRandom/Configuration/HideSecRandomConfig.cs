@@ -1,0 +1,51 @@
+using System.Text.Json.Serialization;
+using CommunityToolkit.Mvvm.ComponentModel;
+using SecRandom.Shared;
+using SecRandom.Shared.Abstraction;
+
+namespace SecRandom.Plugin.HideSecRandom.Configuration;
+
+/// <summary>
+///     HideSecRandom 插件配置。持久化到 SecRandom 主配置文件（settings.json）同目录下的
+///     <c>hide-secrandom.json</c>，JSON 命名/缩进风格与主程序一致
+///     （经宿主 <c>ConfigServiceBase.JsonOptions</c>：snake_case、缩进、宽松转义），
+///     不写入主程序配置文件本身。
+/// </summary>
+public partial class HideSecRandomConfig : ConfigBase
+{
+    /// <summary>总开关：关闭后所有功能立即停用，并恢复已修改的窗口特征。</summary>
+    [ObservableProperty] private bool _enabled = true;
+
+    /// <summary>功能一：调用 SetWindowDisplayAffinity 将窗口标记为不可捕获（屏幕共享/录屏中不可见）。</summary>
+    [ObservableProperty] private bool _excludeFromCapture = true;
+
+    /// <summary>功能二：随机化窗口名称。无边框弹窗始终随机化（仅系统 API 可见）；开启 include_all_windows 后，带标题栏窗口的可见标题栏文字也会随机化。</summary>
+    [ObservableProperty] private bool _randomWindowNames = true;
+
+    /// <summary>功能三：随机增大窗口尺寸（不等长宽各 +1~4px；相等长宽同步 +1~4px）。</summary>
+    [ObservableProperty] private bool _randomWindowSize = true;
+
+    /// <summary>功能四：拦截外部发来的 WM_CLOSE，使弹窗拦截程序无法借此关闭窗口。</summary>
+    [ObservableProperty] private bool _blockWmClose = true;
+
+    /// <summary>功能五：窗口保护。监听层级与状态变化：弹窗被覆盖时立即移回顶层；被外部隐藏、最小化、禁用或移出屏幕时立即恢复；Topmost 层带被剥夺（HWND_BOTTOM 降级）时立即恢复置顶。</summary>
+    [ObservableProperty] private bool _keepOnTop = true;
+
+    /// <summary>
+    ///     弹窗伪装为 WS_EX_TOOLWINDOW 工具窗口：希沃 window_block 对工具窗口不弹本地
+    ///     “确认拦截”提示条，窗口同时从 Alt+Tab 隐藏。Avalonia 不会为 ShowInTaskbar=false
+    ///     的窗口设置该样式位（它改用离屏属主方案），需要插件自行补上。
+    /// </summary>
+    [ObservableProperty] private bool _toolwindowDisguise = true;
+
+    /// <summary>
+    ///     作用范围扩展：<c>false</c> 时功能仅作用于无边框弹出窗口（悬浮窗、快速抽奖窗口等），
+    ///     <c>true</c> 时扩展到本软件全部顶层窗口（主窗口、设置窗口等）。
+    ///     开启后随机窗口名称也会作用于带标题栏窗口：其可见标题栏文字（含任务栏、Alt+Tab）
+    ///     将变为随机字符串。
+    /// </summary>
+    [ObservableProperty] private bool _includeAllWindows;
+
+    [JsonIgnore]
+    public override string ConfigFilePath => Utils.GetFilePath("config", "hide-secrandom.json");
+}

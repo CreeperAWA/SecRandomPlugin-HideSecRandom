@@ -1,0 +1,112 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:fa="clr-namespace:FluentAvalonia.UI.Controls;assembly=FluentAvalonia"
+             xmlns:sr="http://secrandom.sectl.cn/schemas/xaml/core"
+             xmlns:loc="clr-namespace:SecRandom.Plugin.HideSecRandom.Localization"
+             xmlns:local="clr-namespace:SecRandom.Plugin.HideSecRandom.Views.SettingsPages"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="SecRandom.Plugin.HideSecRandom.Views.SettingsPages.HideSecRandomSettingsPage"
+             x:DataType="local:HideSecRandomSettingsPage">
+    <ScrollViewer>
+        <StackPanel Classes="page-container settings">
+
+            <sr:IconText x:Name="S_HideSecRandom"
+                         Text="{x:Static loc:Strings.PluginName}"
+                         Glyph="{sr:Fi EyeOffFilled}"
+                         Margin="0 0 0 4" />
+
+            <TextBlock Text="{x:Static loc:Strings.S_Intro}"
+                       TextWrapping="Wrap"
+                       Opacity="0.75"
+                       Margin="0 0 0 12" />
+
+            <fa:FASettingsExpander x:Name="S_Master"
+                                   Header="{x:Static loc:Strings.S_Master}"
+                                   Description="{x:Static loc:Strings.S_Master_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi ShieldFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.Enabled}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+            <fa:FASettingsExpander x:Name="S_Capture"
+                                   Header="{x:Static loc:Strings.S_Capture}"
+                                   Description="{x:Static loc:Strings.S_Capture_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi CameraOffFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.ExcludeFromCapture}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+            <fa:FASettingsExpander x:Name="S_RandomName"
+                                   Header="{x:Static loc:Strings.S_RandomName}"
+                                   Description="{x:Static loc:Strings.S_RandomName_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi TextFontFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.RandomWindowNames}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+            <fa:FASettingsExpander x:Name="S_RandomSize"
+                                   Header="{x:Static loc:Strings.S_RandomSize}"
+                                   Description="{x:Static loc:Strings.S_RandomSize_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi ArrowMinimizeFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.RandomWindowSize}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+            <fa:FASettingsExpander x:Name="S_BlockClose"
+                                   Header="{x:Static loc:Strings.S_BlockClose}"
+                                   Description="{x:Static loc:Strings.S_BlockClose_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi WindowFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.BlockWmClose}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+            <fa:FASettingsExpander x:Name="S_KeepTop"
+                                   Header="{x:Static loc:Strings.S_KeepTop}"
+                                   Description="{x:Static loc:Strings.S_KeepTop_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi PinFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.KeepOnTop}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+            <fa:FASettingsExpander x:Name="S_Toolwindow"
+                                   Header="{x:Static loc:Strings.S_Toolwindow}"
+                                   Description="{x:Static loc:Strings.S_Toolwindow_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi ShapeExcludeFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.ToolwindowDisguise}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+            <fa:FASettingsExpander x:Name="S_Scope"
+                                   Header="{x:Static loc:Strings.S_Scope}"
+                                   Description="{x:Static loc:Strings.S_Scope_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi SquareMultipleFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.IncludeAllWindows}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+            <fa:FASettingsExpander x:Name="S_ConfigPath"
+                                   Header="{x:Static loc:Strings.S_ConfigPath}"
+                                   Description="{x:Static loc:Strings.S_ConfigPath_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi DocumentFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <TextBlock Text="{Binding ConfigFilePath}"
+                               TextWrapping="Wrap"
+                               Opacity="0.75"
+                               MaxWidth="360"
+                               VerticalAlignment="Center" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

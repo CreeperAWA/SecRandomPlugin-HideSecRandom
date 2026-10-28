@@ -1,0 +1,26 @@
+using Avalonia.Controls;
+using SecRandom.Core.Abstraction;
+using SecRandom.Core.Attributes;
+using SecRandom.Core.Icons;
+using SecRandom.Plugin.HideSecRandom.Configuration;
+
+namespace SecRandom.Plugin.HideSecRandom.Views.SettingsPages;
+
+[PageInfo("plugin.secrandom.hidesecrandom.settings", FluentIcons.EyeOffFilled)]
+public partial class HideSecRandomSettingsPage : UserControl
+{
+    private readonly HideSecRandomConfigHandler _configHandler;
+
+    public HideSecRandomSettingsPage()
+    {
+        // 页面由宿主在运行时创建，此时 Host 已构建，按宿主视图约定用 IAppHost 解析服务。
+        _configHandler = IAppHost.GetService<HideSecRandomConfigHandler>();
+        InitializeComponent();
+        DataContext = this;
+    }
+
+    /// <summary>插件配置对象；属性变更经 ConfigHandlerBase 自动保存。</summary>
+    public HideSecRandomConfig Settings => _configHandler.Data;
+
+    public string ConfigFilePath => _configHandler.Data.ConfigFilePath;
+}
