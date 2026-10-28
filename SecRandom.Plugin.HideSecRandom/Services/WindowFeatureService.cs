@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -12,8 +14,9 @@ using static SecRandom.Plugin.HideSecRandom.Native.NativeMethods;
 namespace SecRandom.Plugin.HideSecRandom.Services;
 
 /// <summary>
-///     HideSecRandom 窗口特性引擎。按配置对宿主顶层窗口应用五个防拦截特性：
-///     防捕获（SetWindowDisplayAffinity）、随机窗口名称、随机窗口大小、拦截 WM_CLOSE、层级置顶恢复。
+///     HideSecRandom 窗口特性引擎。按配置对宿主顶层窗口应用六个防拦截特性：
+///     防捕获（SetWindowDisplayAffinity）、随机窗口名称（内容来源可自定义：窗口问候与嘲讽）、
+///     随机窗口大小、拦截 WM_CLOSE、层级置顶恢复。
 ///     所有窗口操作都在 UI 线程执行；窗口过程与 WinEvent 回调保持无异常、快速返回。
 /// </summary>
 public sealed partial class WindowFeatureService : IDisposable
@@ -62,6 +65,7 @@ public sealed partial class WindowFeatureService : IDisposable
         _started = true;
 
         InstallWinEventHooks();
+        _configHandler.Data.PropertyChanged += ConfigData_OnPropertyChanged;
         _timer = new DispatcherTimer(PollInterval, DispatcherPriority.Background, (_, _) => Tick());
         _timer.Start();
         Tick();
@@ -74,6 +78,7 @@ public sealed partial class WindowFeatureService : IDisposable
             return;
         _started = false;
         _shuttingDown = true;
+        _configHandler.Data.PropertyChanged -= ConfigData_OnPropertyChanged;
 
         try
         {
@@ -128,7 +133,7 @@ public sealed partial class WindowFeatureService : IDisposable
                     continue;
 
                 ApplyCaptureExclusion(tracked, config.ExcludeFromCapture);
-                ApplyRandomTitle(tracked, config.RandomWindowNames && (tracked.IsPopup || config.IncludeAllWindows));
+                ApplyRandomTitle(tracked, config.RandomWindowNames && (tracked.IsPopup || config.IncludeAllWindows), config);
                 ApplyRandomSize(tracked, config.RandomWindowSize);
                 ApplyToolwindowDisguise(tracked, config.ToolwindowDisguise);
                 EnsureCloseHook(tracked);
@@ -216,14 +221,14 @@ public sealed partial class WindowFeatureService : IDisposable
 
     // ---------------------------------------------------------------- 功能二：随机窗口名称
 
-    private void ApplyRandomTitle(TrackedWindow tracked, bool enabled)
+    private void ApplyRandomTitle(TrackedWindow tracked, bool enabled, HideSecRandomConfig config)
     {
         // 作用范围由 Tick 决定：无边框弹窗始终随机化；开启“扩展到所有窗口”后，
         // 主窗口、设置窗口等带标题栏窗口的可见标题栏文字也会随机化（用户显式选择）。
         if (enabled)
         {
             tracked.OriginalTitle ??= GetWindowText(tracked.Hwnd);
-            tracked.RandomTitle ??= GenerateRandomTitle();
+            tracked.RandomTitle ??= GenerateRandomTitle(config);
 
             // 宿主若重新设置了 Title，下一轮立即恢复随机名称。
             var current = GetWindowText(tracked.Hwnd);
@@ -238,12 +243,63 @@ public sealed partial class WindowFeatureService : IDisposable
         }
     }
 
-    private static string GenerateRandomTitle()
+    private const string TitleAlphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+
+    /// <summary>生成随机窗口标题：内容来源加问候/嘲讽装饰（前缀、后缀、插入字母）。</summary>
+    private static string GenerateRandomTitle(HideSecRandomConfig config)
+        => ApplyGreetingDecorations(GenerateTitleContent(config), config);
+
+    /// <summary>
+    ///     标题内容来源：问候/嘲讽开启且有可用句子时随机取一句，否则回退为
+    ///     10 位随机字母数字字符串（原默认行为）。
+    /// </summary>
+    private static string GenerateTitleContent(HideSecRandomConfig config)
     {
-        const string alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
-        Span<char> chars = stackalloc char[10];
+        if (config.GreetingEnabled)
+        {
+            var sentences = config.GreetingSentences;
+            if (sentences is { Count: > 0 })
+            {
+                var sentence = sentences[Random.Shared.Next(sentences.Count)];
+                if (!string.IsNullOrWhiteSpace(sentence))
+                    return sentence.Trim();
+            }
+        }
+
+        return RandomTitleChunk(10);
+    }
+
+    /// <summary>按配置在内容外叠加随机前缀/后缀，并向内容中插入随机字母。</summary>
+    private static string ApplyGreetingDecorations(string content, HideSecRandomConfig config)
+    {
+        if (!config.GreetingEnabled)
+            return content;
+
+        if (config.GreetingRandomPrefix)
+            content = RandomTitleChunk(Random.Shared.Next(2, 5)) + content;
+        if (config.GreetingRandomSuffix)
+            content += RandomTitleChunk(Random.Shared.Next(2, 5));
+        if (config.GreetingRandomInsertLetters)
+            content = InsertRandomLetters(content);
+        return content;
+    }
+
+    private static string InsertRandomLetters(string content)
+    {
+        var builder = new StringBuilder(content);
+        var count = Random.Shared.Next(1, 4);
+        for (var index = 0; index < count; index++)
+            builder.Insert(
+                Random.Shared.Next(builder.Length + 1),
+                TitleAlphabet[Random.Shared.Next(TitleAlphabet.Length)]);
+        return builder.ToString();
+    }
+
+    private static string RandomTitleChunk(int length)
+    {
+        Span<char> chars = stackalloc char[length];
         for (var index = 0; index < chars.Length; index++)
-            chars[index] = alphabet[Random.Shared.Next(alphabet.Length)];
+            chars[index] = TitleAlphabet[Random.Shared.Next(TitleAlphabet.Length)];
         return new string(chars);
     }
 
@@ -601,18 +657,37 @@ public sealed partial class WindowFeatureService : IDisposable
 
     private void RevertAll()
     {
+        var config = _configHandler.Data;
         foreach (var tracked in _tracked.Values)
         {
             if (!tracked.InScope || tracked.Hwnd == 0 || !IsWindow(tracked.Hwnd))
                 continue;
             ApplyCaptureExclusion(tracked, enabled: false);
-            ApplyRandomTitle(tracked, enabled: false);
+            ApplyRandomTitle(tracked, enabled: false, config);
             ApplyRandomSize(tracked, enabled: false);
             ApplyToolwindowDisguise(tracked, enabled: false);
         }
     }
 
     // ---------------------------------------------------------------- WinEvent 与 WM_CLOSE 钩子
+
+    /// <summary>
+    ///     问候/嘲讽相关配置变化后，把已打开窗口的随机标题置空：
+    ///     下一轮 <see cref="ApplyRandomTitle"/> 会以新内容重新随机（原始标题基线保留）。
+    ///     与 Tick 同在 UI 线程执行，无需额外同步。
+    /// </summary>
+    private void ConfigData_OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is not (nameof(HideSecRandomConfig.GreetingEnabled)
+            or nameof(HideSecRandomConfig.GreetingSentences)
+            or nameof(HideSecRandomConfig.GreetingRandomPrefix)
+            or nameof(HideSecRandomConfig.GreetingRandomSuffix)
+            or nameof(HideSecRandomConfig.GreetingRandomInsertLetters)))
+            return;
+
+        foreach (var tracked in _tracked.Values)
+            tracked.RandomTitle = null;
+    }
 
     private static readonly WinEventDelegate WinEventProc = OnWinEvent;
     private static readonly Win32Properties.CustomWndProcHookCallback WndProcHook = OnWndProcHook;

@@ -49,6 +49,86 @@
                 </fa:FASettingsExpander.Footer>
             </fa:FASettingsExpander>
 
+            <fa:FASettingsExpander x:Name="S_Greeting"
+                                   Header="{x:Static loc:Strings.S_Greeting}"
+                                   Description="{x:Static loc:Strings.S_Greeting_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi ChatSparkleFilled}}">
+                <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="2">
+                            <TextBlock x:Name="S_Greeting_Enabled"
+                                       Text="{x:Static loc:Strings.S_Greeting_Enabled}" />
+                            <TextBlock Text="{x:Static loc:Strings.S_Greeting_Enabled_D}"
+                                       TextWrapping="Wrap"
+                                       Opacity="0.75" />
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.GreetingEnabled}" />
+                    </Grid>
+
+                    <StackPanel Spacing="8" IsEnabled="{Binding Settings.GreetingEnabled}">
+                        <StackPanel Spacing="2">
+                            <TextBlock x:Name="S_Greeting_Sentences"
+                                       Text="{x:Static loc:Strings.S_Greeting_Sentences}" />
+                            <TextBlock Text="{x:Static loc:Strings.S_Greeting_Sentences_D}"
+                                       TextWrapping="Wrap"
+                                       Opacity="0.75" />
+                        </StackPanel>
+                        <TextBox x:Name="GreetingSentencesBox"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 MaxHeight="160"
+                                 PlaceholderText="{x:Static loc:Strings.S_Greeting_Sentences_Watermark}"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 LostFocus="GreetingSentencesBox_OnLostFocus" />
+                    </StackPanel>
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsEnabled="{Binding Settings.GreetingEnabled}">
+                        <StackPanel Spacing="2">
+                            <TextBlock x:Name="S_Greeting_Prefix"
+                                       Text="{x:Static loc:Strings.S_Greeting_Prefix}" />
+                            <TextBlock Text="{x:Static loc:Strings.S_Greeting_Prefix_D}"
+                                       TextWrapping="Wrap"
+                                       Opacity="0.75" />
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.GreetingRandomPrefix}" />
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsEnabled="{Binding Settings.GreetingEnabled}">
+                        <StackPanel Spacing="2">
+                            <TextBlock x:Name="S_Greeting_Suffix"
+                                       Text="{x:Static loc:Strings.S_Greeting_Suffix}" />
+                            <TextBlock Text="{x:Static loc:Strings.S_Greeting_Suffix_D}"
+                                       TextWrapping="Wrap"
+                                       Opacity="0.75" />
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.GreetingRandomSuffix}" />
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsEnabled="{Binding Settings.GreetingEnabled}">
+                        <StackPanel Spacing="2">
+                            <TextBlock x:Name="S_Greeting_Insert"
+                                       Text="{x:Static loc:Strings.S_Greeting_Insert}" />
+                            <TextBlock Text="{x:Static loc:Strings.S_Greeting_Insert_D}"
+                                       TextWrapping="Wrap"
+                                       Opacity="0.75" />
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding Settings.GreetingRandomInsertLetters}" />
+                    </Grid>
+
+                    <TextBlock Text="{x:Static loc:Strings.C_Greeting_Scope}"
+                               TextWrapping="Wrap"
+                               Opacity="0.75" />
+                </StackPanel>
+            </fa:FASettingsExpander>
+
             <fa:FASettingsExpander x:Name="S_RandomSize"
                                    Header="{x:Static loc:Strings.S_RandomSize}"
                                    Description="{x:Static loc:Strings.S_RandomSize_D}"

@@ -46,6 +46,26 @@ public partial class HideSecRandomConfig : ConfigBase
     /// </summary>
     [ObservableProperty] private bool _includeAllWindows;
 
+    /// <summary>
+    ///     功能六「窗口问候与嘲讽」总开关：开启后随机窗口标题的内容来源改为
+    ///     <see cref="GreetingSentences"/> 中随机选取的一句，并按需叠加随机前缀、
+    ///     随机后缀与随机插入字母；关闭或句子不可用时内容来源仍为随机字母数字字符串。
+    ///     仅在 random_window_names 开启时才有随机标题可替换。
+    /// </summary>
+    [ObservableProperty] private bool _greetingEnabled;
+
+    /// <summary>问候/嘲讽句子，一行一句对应一个元素；留空（或全部为空白）时回退为随机字符串。</summary>
+    [ObservableProperty] private List<string> _greetingSentences = [];
+
+    /// <summary>在标题开头随机添加 2-4 个字母或数字。</summary>
+    [ObservableProperty] private bool _greetingRandomPrefix = true;
+
+    /// <summary>在标题结尾随机添加 2-4 个字母或数字。</summary>
+    [ObservableProperty] private bool _greetingRandomSuffix = true;
+
+    /// <summary>在内容中随机位置插入 1-3 个字母，保持句子大致可读的同时避免被精确匹配。</summary>
+    [ObservableProperty] private bool _greetingRandomInsertLetters = true;
+
     [JsonIgnore]
     public override string ConfigFilePath => Utils.GetFilePath("config", "hide-secrandom.json");
 }

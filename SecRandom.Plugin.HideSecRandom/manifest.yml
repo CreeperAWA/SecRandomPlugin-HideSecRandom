@@ -1,9 +1,9 @@
 id: secrandom.hidesecrandom
 name: HideSecRandom 窗口隐藏与随机特征
-description: 为 SecRandom Windows 端提供防截屏捕获（SetWindowDisplayAffinity）、随机窗口名称与大小、拦截外部 WM_CLOSE 关闭请求、窗口层级变化时立即恢复顶层等防弹窗拦截能力。所有功能均可在插件设置页中开关；配置保存在 SecRandom 配置文件同目录的 hide-secrandom.json 中。
+description: 为 SecRandom Windows 端提供防截屏捕获（SetWindowDisplayAffinity）、随机窗口名称与大小（标题内容来源可自定义问候/嘲讽句子）、拦截外部 WM_CLOSE 关闭请求、窗口层级变化时立即恢复顶层等防弹窗拦截能力。所有功能均可在插件设置页中开关；配置保存在 SecRandom 配置文件同目录的 hide-secrandom.json 中。
 entranceAssembly: SecRandom.Plugin.HideSecRandom.dll
 apiVersion: 3.1.5
-version: 1.0.0
+version: 1.1.0
 author: HideSecRandom
 url: https://github.com/SECTL/SecRandom
 supportedPlatforms:
