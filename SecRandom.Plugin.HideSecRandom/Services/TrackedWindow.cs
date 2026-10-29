@@ -48,6 +48,12 @@ internal sealed class TrackedWindow
     /// </summary>
     public long SuppressRestoreUntilTicks { get; set; }
 
+    /// <summary>
+    ///     检测到窗口被移出屏幕后的位置恢复抑制截止时刻（TickCount64 毫秒）。
+    ///     与隐藏恢复同理：先让强制关窗动作链的“已移出屏幕”判定成立，序列结束后再送回原位。
+    /// </summary>
+    public long SuppressPositionRestoreUntilTicks { get; set; }
+
     // 自愈基线：最近一次“正常”状态下的原生窗口矩形（物理像素）。
     public bool HasLastGoodRect { get; set; }
     public int LastGoodLeft { get; set; }

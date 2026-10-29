@@ -471,7 +471,8 @@ public sealed partial class WindowFeatureService : IDisposable
     ///
     ///     隐藏恢复刻意<strong>延迟</strong>：弹窗拦截程序的强制关窗动作链在每步隐藏后立即
     ///     检查 IsWindowVisible 决定是否升级 TerminateProcess；立即恢复会撞进其判定窗口。让隐藏
-    ///     “成功”、延迟到其动作序列结束后再恢复，全程不会触发强杀分支。
+    ///     “成功”、延迟到其动作序列结束后再恢复，全程不会触发强杀分支。位置恢复同理延迟：
+    ///     先让“已移出屏幕”判定成立，序列结束后再把窗口送回原位。
     /// </summary>
     private void ApplySelfHeal(TrackedWindow tracked)
     {
@@ -483,6 +484,7 @@ public sealed partial class WindowFeatureService : IDisposable
         {
             // 宿主本意就是隐藏：清掉抑制状态，等待宿主重新显示。
             tracked.SuppressRestoreUntilTicks = 0;
+            tracked.SuppressPositionRestoreUntilTicks = 0;
         }
         else if (!nativeVisible)
         {
@@ -528,11 +530,24 @@ public sealed partial class WindowFeatureService : IDisposable
             _logger.LogInformation("检测到窗口被外部禁用，已恢复（HWND {Hwnd}）。", tracked.Hwnd);
         }
 
-        // 开启「拦截强制关窗动作」时保留屏幕外位置：拦截程序的兜底结束进程分支要求窗口
-        // “始终可见、位置未被移到屏幕外、顶层窗口数 ≤ 1”同时成立；放任移动可使该条件
-        // 永不满足，进程安全优先于窗口位置。
-        if (!_blockForceCloseActive
-            && window.WindowState == WindowState.Normal && nativeVisible && tracked.HasLastGoodRect
+        // 屏幕外位置恢复：与隐藏恢复同理刻意延迟——强制关窗动作链把窗口移出屏幕后仍会
+        // 立即复查，“始终可见 + 未移出屏幕”是其升级结束进程的条件，立即拉回会撞进其判定
+        // 窗口；先让“已移出屏幕”成立、动作序列结束后再送回原位，进程安全与可用性兼顾。
+        if (window.WindowState == WindowState.Normal && nativeVisible && tracked.HasLastGoodRect
+            && !IntersectsAnyMonitor(tracked.Hwnd))
+        {
+            if (tracked.SuppressPositionRestoreUntilTicks == 0)
+                tracked.SuppressPositionRestoreUntilTicks = now + HideRestoreDelayMilliseconds;
+        }
+        else
+        {
+            tracked.SuppressPositionRestoreUntilTicks = 0;
+        }
+
+        if (now < tracked.SuppressPositionRestoreUntilTicks)
+            return; // 位置对抗进行中：等对方动作序列结束，期间不做任何自愈动作。
+
+        if (window.WindowState == WindowState.Normal && nativeVisible && tracked.HasLastGoodRect
             && !IntersectsAnyMonitor(tracked.Hwnd))
         {
             SetWindowPos(tracked.Hwnd, nint.Zero,
