@@ -13,10 +13,12 @@ internal static class NativeMethods
     public const uint GW_HWNDNEXT = 2;
     public const nint HWND_TOP = 0;
     public const nint HWND_TOPMOST = -1;
+    public const nint HWND_BOTTOM = 1;
     public const uint SWP_NOSIZE = 0x0001;
     public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOZORDER = 0x0004;
     public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_HIDEWINDOW = 0x0080;
     public const int SW_SHOW = 5;
     public const int SW_RESTORE = 9;
     public const int SM_XVIRTUALSCREEN = 76;
@@ -25,6 +27,8 @@ internal static class NativeMethods
     public const int SM_CYVIRTUALSCREEN = 79;
     public const int WS_EX_TOPMOST = 0x00000008;
     public const uint WM_CLOSE = 0x0010;
+    public const uint WM_SHOWWINDOW = 0x0018;
+    public const uint WM_WINDOWPOSCHANGING = 0x0046;
     public const uint WM_NCDESTROY = 0x0082;
     public const uint WM_SYSCOMMAND = 0x0112;
     public const ulong SC_CLOSE = 0xF060;
@@ -49,6 +53,19 @@ internal static class NativeMethods
         public readonly int Width => Right - Left;
         public readonly int Height => Bottom - Top;
         public readonly bool IsEmpty => Width <= 0 || Height <= 0;
+    }
+
+    /// <summary>WM_WINDOWPOSCHANGING 的 lParam 指向的结构；窗口过程可就地改写 flags。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct WINDOWPOS
+    {
+        public nint HwndInsertAfter;
+        public nint Hwnd;
+        public int X;
+        public int Y;
+        public int Cx;
+        public int Cy;
+        public uint Flags;
     }
 
     public delegate void WinEventDelegate(

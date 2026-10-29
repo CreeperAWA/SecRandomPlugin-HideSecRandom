@@ -147,6 +147,15 @@
                 </fa:FASettingsExpander.Footer>
             </fa:FASettingsExpander>
 
+            <fa:FASettingsExpander x:Name="S_BlockForceClose"
+                                    Header="{x:Static loc:Strings.S_BlockForceClose}"
+                                    Description="{x:Static loc:Strings.S_BlockForceClose_D}"
+                                    IconSource="{sr:FluentIconSource {sr:Fi FlashFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.BlockForceClose}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
             <fa:FASettingsExpander x:Name="S_KeepTop"
                                    Header="{x:Static loc:Strings.S_KeepTop}"
                                    Description="{x:Static loc:Strings.S_KeepTop_D}"

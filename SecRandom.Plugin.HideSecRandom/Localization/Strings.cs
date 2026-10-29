@@ -24,6 +24,8 @@ public static class Strings
         ["S_RandomSize_D"] = "每个窗口打开时随机增大尺寸：原本长宽不等的窗口长、宽各随机增大 1-4px；原本长宽相等的窗口长、宽一起随机增大相同的 1-4px。",
         ["S_BlockClose"] = "拦截 WM_CLOSE 关闭请求",
         ["S_BlockClose_D"] = "吞掉外部发送的 WM_CLOSE 消息，弹窗拦截程序无法借此关闭窗口；通过界面按钮或 Alt+F4 的正常关闭不受影响。",
+        ["S_BlockForceClose"] = "拦截强制关窗动作",
+        ["S_BlockForceClose_D"] = "针对弹窗拦截程序的强制关窗动作链：拒绝其隐藏标志（SWP_HIDEWINDOW）、拒绝压底降级（HWND_BOTTOM）、拒绝屏幕内的位置与尺寸改动，仅放行“移动到屏幕外”一步——放行移动是为了让拦截程序确认目标已移出屏幕，避免其触发兜底的结束进程（TerminateProcess）。宿主自身的显示、隐藏与布局不受影响；正常关闭（标题栏 X、Alt+F4、界面按钮）也不受影响。",
         ["S_KeepTop"] = "层级与显示保护",
         ["S_KeepTop_D"] = "监听窗口层级与状态变化：弹窗被其他窗口（含本软件其他窗口）覆盖时立即移回顶层；Topmost 置顶层带被剥夺（如被压到 Z 序底部）时立即恢复；窗口被外部隐藏、最小化、禁用或移出屏幕时延迟恢复（以软件自身的显示意图为准，不影响正常的最小化与后台驻留）。",
         ["S_Toolwindow"] = "弹窗工具窗口伪装",
@@ -62,6 +64,8 @@ public static class Strings
         ["S_RandomSize_D"] = "Each window grows randomly when opened: windows whose width and height differ grow 1-4px in each dimension; square windows grow by the same random 1-4px in both dimensions.",
         ["S_BlockClose"] = "Block WM_CLOSE requests",
         ["S_BlockClose_D"] = "Swallows WM_CLOSE messages sent from outside the app, so popup blockers cannot close the window; normal closing through in-app buttons or Alt+F4 keeps working.",
+        ["S_BlockForceClose"] = "Block forced-close actions",
+        ["S_BlockForceClose_D"] = "Counters the forced-close chain used by popup blockers: rejects the hide flag (SWP_HIDEWINDOW), the HWND_BOTTOM demotion, and any on-screen position or size changes, allowing only the final \"move off-screen\" step — letting the move through makes the blocker see its target as dismissed and avoids its fallback TerminateProcess branch. The app's own show, hide and layout operations are unaffected, and so is normal closing (title-bar X, Alt+F4, in-app buttons).",
         ["S_KeepTop"] = "Z-order & visibility guard",
         ["S_KeepTop_D"] = "Watches window z-order and state: a popup covered by another window (including the app's own windows) is immediately moved back to the top; a stripped Topmost band (demoted to the z-order bottom) is re-asserted; windows hidden, minimized, disabled or moved off-screen from outside are restored with a short delay (anchored on the app's own display intent, so normal minimizing and background residency still work).",
         ["S_Toolwindow"] = "Popup tool-window disguise",
@@ -100,6 +104,8 @@ public static class Strings
         ["S_RandomSize_D"] = "各ウィンドウは開くときにランダムに大きくなります：幅と高さが異なるウィンドウは各 1〜4px、正方形のウィンドウは同じランダム値 1〜4px ずつ大きくなります。",
         ["S_BlockClose"] = "WM_CLOSE を遮断",
         ["S_BlockClose_D"] = "外部から送られた WM_CLOSE メッセージを握りつぶし、ポップアップブロッカーによる強制終了を防ぎます。アプリ内ボタンや Alt+F4 による通常の終了は影響を受けません。",
+        ["S_BlockForceClose"] = "強制終了動作を遮断",
+        ["S_BlockForceClose_D"] = "ポップアップブロッカーの強制終了動作に対応します：非表示フラグ（SWP_HIDEWINDOW）、HWND_BOTTOM による最背面への降格、画面内の位置・サイズ変更を拒否し、最後の「画面外への移動」のみを許可します——移動を許可することでブロッカーは対象を「画面外へ退避済み」とみなし、プロセス強制終了（TerminateProcess）の兜底分岐を回避できます。アプリ自身の表示・非表示・レイアウト操作と、通常の終了（タイトルバーの ×、Alt+F4、アプリ内ボタン）には影響しません。",
         ["S_KeepTop"] = "Z 順・表示保護",
         ["S_KeepTop_D"] = "ウィンドウの Z 順と状態を監視します：他のウィンドウ（アプリ自身のウィンドウを含む）に覆われたポップアップは即時に最前面へ戻し、Topmost 層を剥奪されて Z 順の最底へ移動された場合は即時に再適用します。外部から隠された・最小化された・無効化された・画面外へ移動されたウィンドウは短い遅延を置いて復元します（アプリ自身の表示意図を基準にするため、通常の最小化やバックグラウンド常駐には影響しません）。",
         ["S_Toolwindow"] = "ポップアップのツールウィンドウ偽装",
@@ -159,6 +165,8 @@ public static class Strings
     public static string S_RandomSize_D => Get("S_RandomSize_D");
     public static string S_BlockClose => Get("S_BlockClose");
     public static string S_BlockClose_D => Get("S_BlockClose_D");
+    public static string S_BlockForceClose => Get("S_BlockForceClose");
+    public static string S_BlockForceClose_D => Get("S_BlockForceClose_D");
     public static string S_KeepTop => Get("S_KeepTop");
     public static string S_KeepTop_D => Get("S_KeepTop_D");
     public static string S_Toolwindow => Get("S_Toolwindow");

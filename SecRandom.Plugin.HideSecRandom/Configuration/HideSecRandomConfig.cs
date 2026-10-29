@@ -28,11 +28,20 @@ public partial class HideSecRandomConfig : ConfigBase
     /// <summary>功能四：拦截外部发来的 WM_CLOSE，使弹窗拦截程序无法借此关闭窗口。</summary>
     [ObservableProperty] private bool _blockWmClose = true;
 
+    /// <summary>
+    ///     功能四（扩展）：拦截弹窗拦截程序的强制关窗动作链。凡带 HWND_BOTTOM 压底签名的
+    ///     SetWindowPos 调用，一律拒绝其隐藏标志与压底降级，屏幕内的位置/尺寸改动钉回原值，
+    ///     <strong>仅放行“移动到屏幕外”</strong>——放行移动可让拦截程序确认目标已移出屏幕，
+    ///     避免触发其兜底的 TerminateProcess 结束进程。同时吞掉外部投递的
+    ///     WM_SYSCOMMAND SC_CLOSE 与诱导自隐藏的 WM_SHOWWINDOW 通知。
+    /// </summary>
+    [ObservableProperty] private bool _blockForceClose = true;
+
     /// <summary>功能五：窗口保护。监听层级与状态变化：弹窗被覆盖时立即移回顶层；被外部隐藏、最小化、禁用或移出屏幕时立即恢复；Topmost 层带被剥夺（HWND_BOTTOM 降级）时立即恢复置顶。</summary>
     [ObservableProperty] private bool _keepOnTop = true;
 
     /// <summary>
-    ///     弹窗伪装为 WS_EX_TOOLWINDOW 工具窗口：希沃 window_block 对工具窗口不弹本地
+    ///     弹窗伪装为 WS_EX_TOOLWINDOW 工具窗口：常见弹窗拦截程序对工具窗口不弹本地
     ///     “确认拦截”提示条，窗口同时从 Alt+Tab 隐藏。Avalonia 不会为 ShowInTaskbar=false
     ///     的窗口设置该样式位（它改用离屏属主方案），需要插件自行补上。
     /// </summary>

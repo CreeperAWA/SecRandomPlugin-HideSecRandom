@@ -44,7 +44,7 @@ internal sealed class TrackedWindow
 
     /// <summary>
     ///     检测到外部隐藏后的恢复抑制截止时刻（TickCount64 毫秒）。
-    ///     用于避开 KillWindow 隐藏后的可见性判定窗口，防止升级为 TerminateProcess。
+    ///     用于避开强制关窗动作链隐藏后的可见性判定窗口，防止升级为 TerminateProcess。
     /// </summary>
     public long SuppressRestoreUntilTicks { get; set; }
 
@@ -58,6 +58,6 @@ internal sealed class TrackedWindow
     /// <summary>基线时刻窗口是否处于 Topmost 层带（被 HWND_BOTTOM 降级后据此恢复置顶）。</summary>
     public bool LastGoodTopmost { get; set; }
 
-    /// <summary>是否已应用 WS_EX_TOOLWINDOW 伪装（弹窗免希沃本地确认条，同时从 Alt+Tab 隐藏）。</summary>
+    /// <summary>是否已应用 WS_EX_TOOLWINDOW 伪装（弹窗免弹窗拦截程序的本地确认条，同时从 Alt+Tab 隐藏）。</summary>
     public bool ToolwindowApplied { get; set; }
 }

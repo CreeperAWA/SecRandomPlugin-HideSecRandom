@@ -25,7 +25,7 @@ public sealed partial class WindowFeatureService : IDisposable
     private const long EventThrottleMilliseconds = 100;
     private const long ScCloseGraceMilliseconds = 600;
     private const long ProgrammaticCloseGraceMilliseconds = 5000;
-    /// <summary>外部隐藏后的恢复延迟：必须大于 KillWindow 从隐藏到 TerminateProcess 判定的全部耗时（Sleep(200)+微秒级检查）。</summary>
+    /// <summary>外部隐藏后的恢复延迟：必须大于强制关窗动作链从隐藏到结束进程判定的全部耗时（Sleep(200)+微秒级检查）。</summary>
     private const long HideRestoreDelayMilliseconds = 400;
     private static readonly object InstanceGate = new();
     private static WindowFeatureService? _instance;
@@ -38,6 +38,7 @@ public sealed partial class WindowFeatureService : IDisposable
     private DispatcherTimer? _timer;
     private volatile bool _active;
     private volatile bool _blockWmCloseActive;
+    private volatile bool _blockForceCloseActive;
     private volatile bool _shuttingDown;
     private long _lastEventFixTicks;
     private bool _started;
@@ -119,6 +120,7 @@ public sealed partial class WindowFeatureService : IDisposable
             var config = _configHandler.Data;
             _active = config.Enabled;
             _blockWmCloseActive = config.Enabled && config.BlockWmClose;
+            _blockForceCloseActive = config.Enabled && config.BlockForceClose;
 
             if (!_active)
             {
@@ -467,7 +469,7 @@ public sealed partial class WindowFeatureService : IDisposable
     ///     以 Avalonia 的窗口状态为“宿主本意”基准——只有当宿主认为窗口应显示而原生窗口不可见、
     ///     认为未最小化而原生已最小化时才恢复，避免破坏宿主自身的 Hide()（后台驻留、课程联动隐藏）。
     ///
-    ///     隐藏恢复刻意<strong>延迟</strong>：希沃 KillWindow（反编译 0x10032BD0）在每步隐藏后立即
+    ///     隐藏恢复刻意<strong>延迟</strong>：弹窗拦截程序的强制关窗动作链在每步隐藏后立即
     ///     检查 IsWindowVisible 决定是否升级 TerminateProcess；立即恢复会撞进其判定窗口。让隐藏
     ///     “成功”、延迟到其动作序列结束后再恢复，全程不会触发强杀分支。
     /// </summary>
@@ -492,7 +494,7 @@ public sealed partial class WindowFeatureService : IDisposable
             tracked.SuppressRestoreUntilTicks = 0;
         }
 
-        // Topmost 层带恢复：希沃 KillWindow 的 SetWindowPos(HWND_BOTTOM) 会把 Topmost 窗口
+        // Topmost 层带恢复：强制关窗动作链的 SetWindowPos(HWND_BOTTOM) 会把 Topmost 窗口
         // 降级到普通带最底（“被盖住、回到桌面上方”的根源）。层带恢复不影响其位置/可见性判定，
         // 因此在隐藏抑制期内也可立即执行。
         if (tracked.HasLastGoodRect && tracked.LastGoodTopmost
@@ -526,7 +528,11 @@ public sealed partial class WindowFeatureService : IDisposable
             _logger.LogInformation("检测到窗口被外部禁用，已恢复（HWND {Hwnd}）。", tracked.Hwnd);
         }
 
-        if (window.WindowState == WindowState.Normal && nativeVisible && tracked.HasLastGoodRect
+        // 开启「拦截强制关窗动作」时保留屏幕外位置：拦截程序的兜底结束进程分支要求窗口
+        // “始终可见、位置未被移到屏幕外、顶层窗口数 ≤ 1”同时成立；放任移动可使该条件
+        // 永不满足，进程安全优先于窗口位置。
+        if (!_blockForceCloseActive
+            && window.WindowState == WindowState.Normal && nativeVisible && tracked.HasLastGoodRect
             && !IntersectsAnyMonitor(tracked.Hwnd))
         {
             SetWindowPos(tracked.Hwnd, nint.Zero,
@@ -559,10 +565,11 @@ public sealed partial class WindowFeatureService : IDisposable
     }
 
     private static bool IntersectsAnyMonitor(nint hwnd)
-    {
-        if (!GetWindowRect(hwnd, out var rect) || rect.IsEmpty)
-            return false;
+        => GetWindowRect(hwnd, out var rect) && !rect.IsEmpty && RectIntersectsVirtualScreen(in rect);
 
+    /// <summary>矩形是否与整个虚拟屏幕（所有显示器的并集）相交。</summary>
+    private static bool RectIntersectsVirtualScreen(in RECT rect)
+    {
         var left = GetSystemMetrics(SM_XVIRTUALSCREEN);
         var top = GetSystemMetrics(SM_YVIRTUALSCREEN);
         var virtualScreen = new RECT
@@ -577,7 +584,7 @@ public sealed partial class WindowFeatureService : IDisposable
 
     /// <summary>
     ///     从 Z 顶向下扫描：是否存在位于本窗口之上、同层带、与本窗口相交的可见窗口。
-    ///     希沃 KillWindow 的 SetWindowPos(HWND_BOTTOM) 会把窗口压到普通带最底，本进程窗口
+    ///     弹窗拦截程序强制关窗时的 SetWindowPos(HWND_BOTTOM) 会把窗口压到普通带最底，本进程窗口
     ///     （如主界面盖住悬浮窗）同样算覆盖；但前台窗口与属主关联窗口压在上面视为正常
     ///     （如正在操作的快速抽奖窗口），不同层带（Topmost/普通）的窗口不参与比较。
     /// </summary>
@@ -630,7 +637,7 @@ public sealed partial class WindowFeatureService : IDisposable
     }
 
     /// <summary>
-    ///     弹窗伪装为 WS_EX_TOOLWINDOW 工具窗口：希沃 window_block 的窗口分类（0x100093E0）
+    ///     弹窗伪装为 WS_EX_TOOLWINDOW 工具窗口：弹窗拦截程序的窗口分类
     ///     对工具窗口不弹本地“确认拦截”提示条，窗口同时从 Alt+Tab 隐藏。
     ///     Avalonia 12 对 ShowInTaskbar=false 的窗口不设置该样式位（改用离屏属主方案），
     ///     需要插件自行补上。
@@ -728,7 +735,7 @@ public sealed partial class WindowFeatureService : IDisposable
     }
 
     /// <summary>
-    ///     官方 WM_CLOSE 钩子回调：仅在需要拦截时置 handled 吞掉消息，其余一切消息
+    ///     官方窗口过程钩子回调：仅在需要拦截时置 handled 吞掉消息，其余一切消息
     ///     原样交回 Avalonia 的窗口过程（IME、键盘、触摸、UIA 等不受影响）。
     /// </summary>
     private static nint OnWndProcHook(nint hwnd, uint msg, nint wParam, nint lParam, ref bool handled)
@@ -742,20 +749,93 @@ public sealed partial class WindowFeatureService : IDisposable
             switch (msg)
             {
                 case WM_SYSCOMMAND:
-                    // 希沃 window_block 的 KillWindow 以 PostMessageW(WM_SYSCOMMAND, SC_CLOSE,
-                    // lParam=0) 强制关窗（反编译 0x10032BD0 证据）。用户真实触发的 SC_CLOSE
-                    // 携带光标坐标或 -1（lParam != 0），且只存在于带 WS_SYSMENU 的窗口：
+                    // 弹窗拦截程序以 PostMessageW(WM_SYSCOMMAND, SC_CLOSE, lParam=0) 强制关窗。
+                    // 用户真实触发的 SC_CLOSE 携带光标坐标或 -1（lParam != 0），且只存在于带
+                    // WS_SYSMENU 的窗口：
                     // - 无边框弹窗：不存在用户触发的 SC_CLOSE，一律吞掉；
                     // - 带标题栏窗口：仅吞 lParam == 0 的外部投递，真实的 X/Alt+F4 放行。
                     if (((ulong)(long)wParam & 0xFFF0UL) == SC_CLOSE)
                     {
                         var hasSysMenu = (GetWindowLongPtr(hwnd, GWL_STYLE) & WS_SYSMENU) != 0;
-                        if (!hasSysMenu || lParam == nint.Zero)
+                        if (instance._blockForceCloseActive && (!hasSysMenu || lParam == nint.Zero))
                         {
                             handled = true;
                             return nint.Zero;
                         }
                         tracked.AllowCloseUntilTicks = Environment.TickCount64 + ScCloseGraceMilliseconds;
+                    }
+                    break;
+
+                case WM_WINDOWPOSCHANGING:
+                    // 强制关窗动作链的每次 SetWindowPos 都带 HWND_BOTTOM 压底签名（隐藏、
+                    // 移出屏幕、压底打包在同一次调用中）；宿主与用户操作不会使用 HWND_BOTTOM，
+                    // 以此区分内外来源，宿主自身的显示/隐藏/布局不受影响。
+                    // 策略：仅放行“移动到屏幕外”一步（让拦截程序确认目标已移出屏幕，避免其
+                    // 升级为结束进程）；隐藏标志、压底降级、屏幕内移动与捆绑的尺寸改动一律拒绝。
+                    if (instance._blockForceCloseActive && lParam != nint.Zero
+                        && GetWindowRect(hwnd, out var current))
+                    {
+                        var pos = Marshal.PtrToStructure<WINDOWPOS>(lParam);
+                        var isForcedClose = pos.HwndInsertAfter == HWND_BOTTOM;
+                        var modified = false;
+
+                        if (isForcedClose)
+                        {
+                            pos.Flags &= ~SWP_HIDEWINDOW; // 拒绝隐藏
+                            pos.Flags |= SWP_NOZORDER;    // 拒绝压底，保持当前层带
+                            modified = true;
+                        }
+
+                        if ((pos.Flags & SWP_NOMOVE) == 0)
+                        {
+                            var hasSize = (pos.Flags & SWP_NOSIZE) == 0;
+                            var width = hasSize ? pos.Cx : current.Width;
+                            var height = hasSize ? pos.Cy : current.Height;
+                            var target = new RECT
+                            {
+                                Left = pos.X,
+                                Top = pos.Y,
+                                Right = pos.X + width,
+                                Bottom = pos.Y + height,
+                            };
+
+                            if (!RectIntersectsVirtualScreen(in target))
+                            {
+                                // 移动到屏幕外：放行，但拒绝捆绑的尺寸改动（如 0×0），保持窗口完整。
+                                if (hasSize)
+                                {
+                                    pos.Flags |= SWP_NOSIZE;
+                                    modified = true;
+                                }
+                            }
+                            else if (isForcedClose)
+                            {
+                                // 强制关窗签名下的屏幕内移动：钉回原位，同一调用中的尺寸改动一并拒绝。
+                                pos.X = current.Left;
+                                pos.Y = current.Top;
+                                pos.Flags |= SWP_NOSIZE;
+                                modified = true;
+                            }
+                        }
+                        else if (isForcedClose && (pos.Flags & SWP_NOSIZE) == 0)
+                        {
+                            pos.Flags |= SWP_NOSIZE; // 无移动的强制关窗调用：尺寸改动同样拒绝。
+                            modified = true;
+                        }
+
+                        if (modified)
+                            Marshal.StructureToPtr(pos, lParam, fDeleteOld: false);
+                    }
+                    break;
+
+                case WM_SHOWWINDOW:
+                    // 动作链里 ShowWindow(SW_HIDE) 失败时会补发 SendMessage(WM_SHOWWINDOW, 0, 0)
+                    // 诱导应用“自行隐藏”。宿主 Avalonia 不处理本消息（反编译确认无引用），
+                    // 吞掉不影响任何宿主行为。
+                    if (instance._blockForceCloseActive && wParam == nint.Zero && lParam == nint.Zero)
+                    {
+                        handled = true;
+                        return nint.Zero;
                     }
                     break;
 
