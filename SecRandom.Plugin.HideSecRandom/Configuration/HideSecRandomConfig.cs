@@ -22,8 +22,8 @@ public partial class HideSecRandomConfig : ConfigBase
     /// <summary>功能二：随机化窗口名称。无边框弹窗始终随机化（仅系统 API 可见）；开启 include_all_windows 后，带标题栏窗口的可见标题栏文字也会随机化。</summary>
     [ObservableProperty] private bool _randomWindowNames = true;
 
-    /// <summary>功能三：随机增大窗口尺寸（不等长宽各 +1~4px；相等长宽同步 +1~4px）。</summary>
-    [ObservableProperty] private bool _randomWindowSize = true;
+    /// <summary>功能三：随机增大窗口尺寸（不等长宽各 +1~4px；相等长宽同步 +1~4px），默认关闭。</summary>
+    [ObservableProperty] private bool _randomWindowSize = false;
 
     /// <summary>功能四：拦截外部发来的 WM_CLOSE，使弹窗拦截程序无法借此关闭窗口。</summary>
     [ObservableProperty] private bool _blockWmClose = true;
