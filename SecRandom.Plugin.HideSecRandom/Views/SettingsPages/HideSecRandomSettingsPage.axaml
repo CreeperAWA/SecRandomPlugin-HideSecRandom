@@ -183,19 +183,6 @@
                 </fa:FASettingsExpander.Footer>
             </fa:FASettingsExpander>
 
-            <fa:FASettingsExpander x:Name="S_ConfigPath"
-                                   Header="{x:Static loc:Strings.S_ConfigPath}"
-                                   Description="{x:Static loc:Strings.S_ConfigPath_D}"
-                                   IconSource="{sr:FluentIconSource {sr:Fi DocumentFilled}}">
-                <fa:FASettingsExpander.Footer>
-                    <TextBlock Text="{Binding ConfigFilePath}"
-                               TextWrapping="Wrap"
-                               Opacity="0.75"
-                               MaxWidth="360"
-                               VerticalAlignment="Center" />
-                </fa:FASettingsExpander.Footer>
-            </fa:FASettingsExpander>
-
         </StackPanel>
     </ScrollViewer>
 </UserControl>

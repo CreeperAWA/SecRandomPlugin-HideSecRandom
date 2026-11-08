@@ -24,8 +24,6 @@ public partial class HideSecRandomSettingsPage : UserControl
     /// <summary>插件配置对象；属性变更经 ConfigHandlerBase 自动保存。</summary>
     public HideSecRandomConfig Settings => _configHandler.Data;
 
-    public string ConfigFilePath => _configHandler.Data.ConfigFilePath;
-
     /// <summary>
     ///     保存自定义句子（一行一句）：失焦时才写回，避免每次按键都写盘；
     ///     整体替换列表以触发配置自动保存，并让引擎在下一轮刷新已打开窗口的标题。

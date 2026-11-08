@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json.Serialization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using SecRandom.Shared;
@@ -6,8 +7,9 @@ using SecRandom.Shared.Abstraction;
 namespace SecRandom.Plugin.HideSecRandom.Configuration;
 
 /// <summary>
-///     HideSecRandom 插件配置。持久化到 SecRandom 主配置文件（settings.json）同目录下的
-///     <c>hide-secrandom.json</c>，JSON 命名/缩进风格与主程序一致
+///     HideSecRandom 插件配置。持久化到插件私有配置目录
+///     （宿主 <c>PluginBase.PluginConfigFolder</c>，即 <c>data/config/plugins/secrandom.hidesecrandom</c>）
+///     下的 <c>hide-secrandom.json</c>，JSON 命名/缩进风格与主程序一致
 ///     （经宿主 <c>ConfigServiceBase.JsonOptions</c>：snake_case、缩进、宽松转义），
 ///     不写入主程序配置文件本身。
 /// </summary>
@@ -75,6 +77,12 @@ public partial class HideSecRandomConfig : ConfigBase
     /// <summary>在内容中随机位置插入 1-3 个字母，保持句子大致可读的同时避免被精确匹配。</summary>
     [ObservableProperty] private bool _greetingRandomInsertLetters = true;
 
+    /// <summary>
+    ///     插件私有配置目录。由入口 <c>Plugin.Initialize</c> 在宿主解析服务前
+    ///     从 <c>PluginBase.PluginConfigFolder</c> 写入；未初始化时回退到主配置目录。
+    /// </summary>
+    internal static string ConfigDirectory { get; set; } = Utils.GetFilePath("config");
+
     [JsonIgnore]
-    public override string ConfigFilePath => Utils.GetFilePath("config", "hide-secrandom.json");
+    public override string ConfigFilePath => Path.Combine(ConfigDirectory, "hide-secrandom.json");
 }

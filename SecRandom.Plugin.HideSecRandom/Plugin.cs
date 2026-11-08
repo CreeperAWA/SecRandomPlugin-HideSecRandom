@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using SecRandom.Core.Abstraction;
 using SecRandom.Core.Extensions.Registry;
+using SecRandom.Plugin.HideSecRandom.Configuration;
 using SecRandom.Plugin.HideSecRandom.Localization;
 using SecRandom.Plugin.HideSecRandom.Services;
 using SecRandom.Plugin.HideSecRandom.Views.SettingsPages;
@@ -20,6 +21,8 @@ public sealed class Plugin : PluginBase
 
     public override void Initialize(HostBuilderContext context, IServiceCollection services)
     {
+        // 按官方文档建议把私有配置写入 data/config/plugins/<id>（PluginBase.PluginConfigFolder）。
+        HideSecRandomConfig.ConfigDirectory = PluginConfigFolder;
         services.AddSingleton<HideSecRandomConfigHandler>();
         services.AddSingleton<WindowFeatureService>();
         services.AddSettingsPage<HideSecRandomSettingsPage>(Strings.PluginName);
