@@ -19,11 +19,14 @@ namespace SecRandom.Plugin.HideSecRandom.Services;
 ///     随机窗口大小、拦截 WM_CLOSE、层级置顶恢复、工具窗口伪装；原生弹窗（下拉框、Flyout、
 ///     文件选择器等 WS_POPUP 顶层窗口）的保护可独立开关，采用事件驱动（创建/显示即时挂钩、
 ///     销毁即释放，仅在开启时做一次种子扫描），无周期性窗口枚举开销。
+///     引擎整体事件驱动为主：新窗口跟踪、特征应用、标题恢复与覆盖检测均由 WinEvent
+///     即时触发，仅保留低频兜底轮询兜住未产生事件的漏网变化。
 ///     所有窗口操作都在 UI 线程执行；窗口过程与 WinEvent 回调保持无异常、快速返回。
 /// </summary>
 public sealed partial class WindowFeatureService : IDisposable
 {
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(200);
+    /// <summary>兜底轮询间隔。已知场景全部由 WinEvent 事件驱动即时处理，定时器只兜住未产生事件的漏网变化。</summary>
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
     private const long EventThrottleMilliseconds = 100;
     private const long ScCloseGraceMilliseconds = 600;
     private const long ProgrammaticCloseGraceMilliseconds = 5000;
@@ -135,19 +138,7 @@ public sealed partial class WindowFeatureService : IDisposable
 
             RefreshTracking();
             foreach (var tracked in _tracked.Values)
-            {
-                if (!tracked.InScope || tracked.Hwnd == 0 || !IsWindow(tracked.Hwnd))
-                    continue;
-                if (tracked.IsNative && !_nativePopupActive)
-                    continue;
-
-                ApplyCaptureExclusion(tracked, config.ExcludeFromCapture);
-                ApplyRandomTitle(tracked, config.RandomWindowNames && (tracked.IsPopup || config.IncludeAllWindows), config);
-                if (!tracked.IsNative)
-                    ApplyRandomSize(tracked, config.RandomWindowSize);
-                ApplyToolwindowDisguise(tracked, config.ToolwindowDisguise);
-                EnsureCloseHook(tracked);
-            }
+                ApplyFeaturesToWindow(tracked, config);
 
             EnforceTopOrder();
         }
@@ -156,6 +147,21 @@ public sealed partial class WindowFeatureService : IDisposable
             // 插件代码不允许把异常抛进宿主 UI 线程（会被归因到插件并自动禁用）。
             _logger.LogError(exception, "HideSecRandom 周期处理失败。");
         }
+    }
+
+    /// <summary>对单个被跟踪窗口应用全部保护特征；轮询兜底与 WinEvent 即时跟踪共用。</summary>
+    private void ApplyFeaturesToWindow(TrackedWindow tracked, HideSecRandomConfig config)
+    {
+        if (!tracked.InScope || tracked.Hwnd == 0 || !IsWindow(tracked.Hwnd))
+            return;
+        if (tracked.IsNative && !_nativePopupActive)
+            return;
+        ApplyCaptureExclusion(tracked, config.ExcludeFromCapture);
+        ApplyRandomTitle(tracked, config.RandomWindowNames && (tracked.IsPopup || config.IncludeAllWindows), config);
+        if (!tracked.IsNative)
+            ApplyRandomSize(tracked, config.RandomWindowSize);
+        ApplyToolwindowDisguise(tracked, config.ToolwindowDisguise);
+        EnsureCloseHook(tracked);
     }
 
     /// <summary>对照 Avalonia 生命周期中的窗口集合，增删被跟踪窗口并刷新作用范围。</summary>
@@ -788,7 +794,7 @@ public sealed partial class WindowFeatureService : IDisposable
         if ((style & WS_POPUP) == 0 || (style & WS_CHILD) != 0)
             return false;
 
-        var tracked = new TrackedWindow { Hwnd = hwnd, IsPopup = true, IsNative = true };
+        var tracked = new TrackedWindow { Hwnd = hwnd, IsPopup = true, IsNative = true, InScope = true };
         _tracked[hwnd] = tracked;
         try
         {
@@ -809,24 +815,71 @@ public sealed partial class WindowFeatureService : IDisposable
             UnhookClose(tracked);
     }
 
+    /// <summary>
+    ///     WinEvent 创建/显示路径的即时跟踪 + 特征应用：新原生弹窗由 <see cref="TryTrackNativePopup"/>
+    ///     接管；未跟踪的本进程顶层窗口则对照 Avalonia Window 集合补录（覆盖错过 CREATE 事件的
+    ///     情形）。无论哪条路径，新窗口的保护特征都立即应用，不等兜底轮询。
+    /// </summary>
+    private void TrackAndApply(nint hwnd)
+    {
+        if (TryTrackNativePopup(hwnd))
+        {
+            ApplyFeaturesToWindow(_tracked[hwnd], _configHandler.Data);
+            return;
+        }
+
+        if (_tracked.ContainsKey(hwnd))
+            return;
+        _ = GetWindowThreadProcessId(hwnd, out var processId);
+        if (processId != (uint)Environment.ProcessId)
+            return;
+
+        var style = (uint)GetWindowLongPtr(hwnd, GWL_STYLE);
+        if ((style & WS_CHILD) != 0)
+            return; // 子窗口不可能是 Avalonia 顶层窗口。
+
+        RefreshTracking();
+        if (_tracked.TryGetValue(hwnd, out var tracked))
+            ApplyFeaturesToWindow(tracked, _configHandler.Data);
+    }
+
+    /// <summary>
+    ///     窗口标题被外部重设后立即恢复随机名称。<see cref="ApplyRandomTitle"/> 内部会先比对
+    ///     当前标题再写入，因此我们自己写标题触发的 NAMECHANGE 事件不会形成事件循环。
+    /// </summary>
+    private void ReassertRandomTitle(nint hwnd)
+    {
+        if (!_active)
+            return;
+        if (!_tracked.TryGetValue(hwnd, out var tracked) || tracked.RandomTitle is null)
+            return;
+        var config = _configHandler.Data;
+        if (!config.RandomWindowNames || !(tracked.IsPopup || config.IncludeAllWindows))
+            return;
+        ApplyRandomTitle(tracked, enabled: true, config);
+    }
+
     // ---------------------------------------------------------------- WinEvent 与 WM_CLOSE 钩子
 
     /// <summary>
     ///     问候/嘲讽相关配置变化后，把已打开窗口的随机标题置空：
-    ///     下一轮 <see cref="ApplyRandomTitle"/> 会以新内容重新随机（原始标题基线保留）。
-    ///     与 Tick 同在 UI 线程执行，无需额外同步。
+    ///     <see cref="ApplyRandomTitle"/> 会以新内容重新随机（原始标题基线保留）。
+    ///     任意配置变化都会立即调度一次 Tick（开关即时生效、原生弹窗保护即时启停），
+    ///     不必等兜底轮询；本回调与 Tick 同在 UI 线程执行，无需额外同步。
     /// </summary>
     private void ConfigData_OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is not (nameof(HideSecRandomConfig.GreetingEnabled)
+        if (e.PropertyName is nameof(HideSecRandomConfig.GreetingEnabled)
             or nameof(HideSecRandomConfig.GreetingSentences)
             or nameof(HideSecRandomConfig.GreetingRandomPrefix)
             or nameof(HideSecRandomConfig.GreetingRandomSuffix)
-            or nameof(HideSecRandomConfig.GreetingRandomInsertLetters)))
-            return;
+            or nameof(HideSecRandomConfig.GreetingRandomInsertLetters))
+        {
+            foreach (var tracked in _tracked.Values)
+                tracked.RandomTitle = null;
+        }
 
-        foreach (var tracked in _tracked.Values)
-            tracked.RandomTitle = null;
+        Dispatcher.UIThread.Post(Tick, DispatcherPriority.Background);
     }
 
     private static readonly WinEventDelegate WinEventProc = OnWinEvent;
@@ -862,10 +915,20 @@ public sealed partial class WindowFeatureService : IDisposable
 
     private void InstallWinEventHooks()
     {
-        // idProcess 限定为本进程：钩子用途（自愈覆盖检查、新弹窗即时跟踪）只关心本进程
-        // 窗口，限定后系统里其它进程的事件不会派发进本进程 UI 线程，避免全局钩子的
-        // 无谓回调开销。
-        foreach (var eventType in (uint[])[EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, EVENT_OBJECT_REORDER])
+        // 覆盖检测触发器：必须全局（idProcess=0）。外部窗口成为前台、显示或 Z 序变化都
+        // 可能让本软件窗口被覆盖；外部程序对本软件窗口的隐藏/压底动作产生的事件同样
+        // 依赖全局钩子送达，事件即时触发 EnforceTopOrder，不依赖轮询。事件只在有变化
+        // 时派发，不是轮询。
+        foreach (var eventType in (uint[])[EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, EVENT_OBJECT_REORDER])
+        {
+            var hook = SetWinEventHook(eventType, eventType, nint.Zero, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+            if (hook != nint.Zero)
+                _winEventHooks.Add(hook);
+        }
+
+        // 本进程限定：新窗口即时跟踪与标题变化。EVENT_OBJECT_CREATE 在全系统范围内极其
+        // 频繁（每个控件创建都会触发），限定本进程避免无谓回调开销。
+        foreach (var eventType in (uint[])[EVENT_OBJECT_CREATE, EVENT_OBJECT_NAMECHANGE])
         {
             var hook = SetWinEventHook(
                 eventType, eventType, nint.Zero, WinEventProc, (uint)Environment.ProcessId, 0, WINEVENT_OUTOFCONTEXT);
@@ -883,11 +946,16 @@ public sealed partial class WindowFeatureService : IDisposable
 
         try
         {
-            // 新弹窗创建/显示（下拉框、Flyout、文件选择器、隐藏的弹窗属主 PhonyRootWindow 等）：
-            // 立即跟踪并挂钩。必须在节流之前执行——节流可能恰好丢弃这次事件，
-            // 而跟踪本身有 ContainsKey/样式位短路，代价远小于节流间隔。
+            // 新窗口创建/显示（下拉框、Flyout、文件选择器、Avalonia 窗口、隐藏的弹窗属主
+            // PhonyRootWindow 等）：立即跟踪、挂钩并应用保护特征。必须在节流之前执行——
+            // 节流可能恰好丢弃这次事件，而跟踪本身有 ContainsKey/样式位短路，
+            // 代价远小于节流间隔。
             if ((eventType == EVENT_OBJECT_CREATE || eventType == EVENT_OBJECT_SHOW) && hwnd != nint.Zero)
-                instance.TryTrackNativePopup(hwnd);
+                instance.TrackAndApply(hwnd);
+
+            // 窗口标题被重设（宿主或其它代码）：立即恢复随机名称，不等兜底轮询。
+            if (eventType == EVENT_OBJECT_NAMECHANGE && hwnd != nint.Zero)
+                instance.ReassertRandomTitle(hwnd);
 
             var now = Environment.TickCount64;
             var last = Interlocked.Read(ref instance._lastEventFixTicks);

@@ -42,6 +42,7 @@ internal static class NativeMethods
     public const uint EVENT_OBJECT_SHOW = 0x8002;
     public const uint EVENT_OBJECT_HIDE = 0x8003;
     public const uint EVENT_OBJECT_REORDER = 0x8004;
+    public const uint EVENT_OBJECT_NAMECHANGE = 0x800C;
     public const int OBJID_WINDOW = 0;
     public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
     public const int DWMWA_CLOAKED = 14;
