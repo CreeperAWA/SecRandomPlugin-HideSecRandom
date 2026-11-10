@@ -58,6 +58,15 @@ public partial class HideSecRandomConfig : ConfigBase
     [ObservableProperty] private bool _includeAllWindows;
 
     /// <summary>
+    ///     原生弹窗保护：下拉框（ComboBox）、Flyout、右键菜单、悬浮提示以及系统文件选择器
+    ///     （安装插件时的 IFileDialog）等弹出层宿主在 Avalonia Window 集合之外的本进程
+    ///     WS_POPUP 顶层窗口（如 PhonyRootWindow）中，开启后对其同样应用 WM_CLOSE 拦截、
+    ///     强制关窗对抗、随机名称、防捕获与工具窗口伪装。
+    ///     采用事件驱动：窗口创建/显示时即时挂钩，销毁时释放，无周期性窗口枚举开销。
+    /// </summary>
+    [ObservableProperty] private bool _nativePopupProtection = true;
+
+    /// <summary>
     ///     功能六「窗口问候与嘲讽」总开关：开启后随机窗口标题的内容来源改为
     ///     <see cref="GreetingSentences"/> 中随机选取的一句，并按需叠加随机前缀、
     ///     随机后缀与随机插入字母；关闭或句子不可用时内容来源仍为随机字母数字字符串。

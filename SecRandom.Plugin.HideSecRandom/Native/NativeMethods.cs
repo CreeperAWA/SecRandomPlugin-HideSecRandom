@@ -7,7 +7,10 @@ internal static class NativeMethods
 {
     public const int GWL_EXSTYLE = -20;
     public const int GWL_STYLE = -16;
+    public const int GWLP_WNDPROC = -4;
     public const int WS_SYSMENU = 0x00080000;
+    public const uint WS_POPUP = 0x80000000;
+    public const uint WS_CHILD = 0x40000000;
     public const int WS_EX_TOOLWINDOW = 0x00000080;
     public const uint GW_OWNER = 4;
     public const uint GW_HWNDNEXT = 2;
@@ -35,6 +38,7 @@ internal static class NativeMethods
     public const uint WDA_NONE = 0x00000000;
     public const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
     public const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+    public const uint EVENT_OBJECT_CREATE = 0x8000;
     public const uint EVENT_OBJECT_SHOW = 0x8002;
     public const uint EVENT_OBJECT_HIDE = 0x8003;
     public const uint EVENT_OBJECT_REORDER = 0x8004;
@@ -70,6 +74,19 @@ internal static class NativeMethods
 
     public delegate void WinEventDelegate(
         nint hWinEventHook, uint eventType, nint hwnd, int idObject, int idChild, uint idEventThread, uint dwmsEventTime);
+
+    public delegate bool EnumWindowsProc(nint hWnd, nint lParam);
+
+    public delegate nint WndProcDelegate(nint hWnd, uint msg, nint wParam, nint lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, nint lParam);
+
+    [DllImport("user32.dll")]
+    public static extern nint CallWindowProc(nint lpPrevWndFunc, nint hWnd, uint msg, nint wParam, nint lParam);
+
+    [DllImport("user32.dll")]
+    public static extern nint DefWindowProcW(nint hWnd, uint msg, nint wParam, nint lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

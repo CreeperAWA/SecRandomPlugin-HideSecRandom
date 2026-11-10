@@ -8,12 +8,16 @@ namespace SecRandom.Plugin.HideSecRandom.Services;
 /// </summary>
 internal sealed class TrackedWindow
 {
-    public required Window Window { get; init; }
+    /// <summary>对应的 Avalonia 窗口；原生弹窗（下拉框、Flyout 等非 Window 弹出层宿主）为 null。</summary>
+    public Window? Window { get; init; }
 
     /// <summary>Win32 句柄；窗口尚未创建平台句柄时为 0，待下一轮重试。</summary>
     public nint Hwnd { get; set; }
 
-    /// <summary>无边框弹出窗口（WindowDecorations == None）。</summary>
+    /// <summary>原生弹窗：不属于 Avalonia Window 集合的本进程 WS_POPUP 顶层窗口，经 GWLP_WNDPROC 子类化保护。</summary>
+    public bool IsNative { get; init; }
+
+    /// <summary>无边框弹出窗口（WindowDecorations == None，或原生 WS_POPUP 弹窗）。</summary>
     public bool IsPopup { get; init; }
 
     /// <summary>是否在当前作用范围内（弹出窗口，或用户开启了“扩展到所有窗口”）。</summary>
@@ -33,8 +37,12 @@ internal sealed class TrackedWindow
     public double? OriginalMinWidth { get; set; }
     public double? OriginalMinHeight { get; set; }
 
-    // WM_CLOSE 拦截（Win32Properties.AddWndProcHookCallback，官方钩子）
+    // WM_CLOSE 拦截：Avalonia 窗口用官方钩子 Win32Properties.AddWndProcHookCallback，
+    // 原生弹窗用 GWLP_WNDPROC 子类化（OriginalWndProc 保存原窗口过程）。
     public bool CloseHookInstalled { get; set; }
+
+    /// <summary>原生弹窗子类化前的原窗口过程指针；卸载钩子时还原。</summary>
+    public nint OriginalWndProc { get; set; }
 
     /// <summary>用户通过标题栏关闭按钮 / Alt+F4 触发 SC_CLOSE 后的短暂放行截止时刻（TickCount64 毫秒）。</summary>
     public long AllowCloseUntilTicks { get; set; }

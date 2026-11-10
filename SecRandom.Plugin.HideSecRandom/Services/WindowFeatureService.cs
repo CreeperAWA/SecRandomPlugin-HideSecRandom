@@ -14,9 +14,11 @@ using static SecRandom.Plugin.HideSecRandom.Native.NativeMethods;
 namespace SecRandom.Plugin.HideSecRandom.Services;
 
 /// <summary>
-///     HideSecRandom 窗口特性引擎。按配置对宿主顶层窗口应用六个防拦截特性：
+///     HideSecRandom 窗口特性引擎。按配置对宿主顶层窗口应用防拦截特性：
 ///     防捕获（SetWindowDisplayAffinity）、随机窗口名称（内容来源可自定义：窗口问候与嘲讽）、
-///     随机窗口大小、拦截 WM_CLOSE、层级置顶恢复。
+///     随机窗口大小、拦截 WM_CLOSE、层级置顶恢复、工具窗口伪装；原生弹窗（下拉框、Flyout、
+///     文件选择器等 WS_POPUP 顶层窗口）的保护可独立开关，采用事件驱动（创建/显示即时挂钩、
+///     销毁即释放，仅在开启时做一次种子扫描），无周期性窗口枚举开销。
 ///     所有窗口操作都在 UI 线程执行；窗口过程与 WinEvent 回调保持无异常、快速返回。
 /// </summary>
 public sealed partial class WindowFeatureService : IDisposable
@@ -39,6 +41,7 @@ public sealed partial class WindowFeatureService : IDisposable
     private volatile bool _active;
     private volatile bool _blockWmCloseActive;
     private volatile bool _blockForceCloseActive;
+    private volatile bool _nativePopupActive;
     private volatile bool _shuttingDown;
     private long _lastEventFixTicks;
     private bool _started;
@@ -79,6 +82,7 @@ public sealed partial class WindowFeatureService : IDisposable
             return;
         _started = false;
         _shuttingDown = true;
+        _nativePopupActive = false; // 下次 Start 后重新做种子扫描。
         _configHandler.Data.PropertyChanged -= ConfigData_OnPropertyChanged;
 
         try
@@ -121,6 +125,7 @@ public sealed partial class WindowFeatureService : IDisposable
             _active = config.Enabled;
             _blockWmCloseActive = config.Enabled && config.BlockWmClose;
             _blockForceCloseActive = config.Enabled && config.BlockForceClose;
+            SyncNativeProtection(config);
 
             if (!_active)
             {
@@ -133,10 +138,13 @@ public sealed partial class WindowFeatureService : IDisposable
             {
                 if (!tracked.InScope || tracked.Hwnd == 0 || !IsWindow(tracked.Hwnd))
                     continue;
+                if (tracked.IsNative && !_nativePopupActive)
+                    continue;
 
                 ApplyCaptureExclusion(tracked, config.ExcludeFromCapture);
                 ApplyRandomTitle(tracked, config.RandomWindowNames && (tracked.IsPopup || config.IncludeAllWindows), config);
-                ApplyRandomSize(tracked, config.RandomWindowSize);
+                if (!tracked.IsNative)
+                    ApplyRandomSize(tracked, config.RandomWindowSize);
                 ApplyToolwindowDisguise(tracked, config.ToolwindowDisguise);
                 EnsureCloseHook(tracked);
             }
@@ -185,8 +193,14 @@ public sealed partial class WindowFeatureService : IDisposable
             alive.Add(hwnd);
         }
 
+        // Avalonia 的 Popup（ComboBox 下拉框、Flyout、ToolTip、系统文件选择器等）宿主在独立的
+        // 本进程 WS_POPUP 顶层窗口中（如拦截程序窗口列表里的 PhonyRootWindow/"Window"），
+        // 不在 Window 集合内；由事件驱动（创建/显示/销毁）负责跟踪，不在这里周期枚举。
+
         foreach (var tracked in _tracked.Values)
         {
+            if (tracked.IsNative)
+                continue; // 原生弹窗由 WM_NCDESTROY 事件释放，不参与集合对账。
             if (alive.Contains(tracked.Hwnd))
                 continue;
             if (_tracked.TryRemove(tracked.Hwnd, out _))
@@ -310,6 +324,8 @@ public sealed partial class WindowFeatureService : IDisposable
     private void ApplyRandomSize(TrackedWindow tracked, bool enabled)
     {
         var window = tracked.Window;
+        if (window is null)
+            return; // 原生弹窗没有 Avalonia 尺寸语义，不做随机尺寸。
         if (enabled && !tracked.SizeApplied)
         {
             if (window.WindowState != WindowState.Normal)
@@ -399,10 +415,20 @@ public sealed partial class WindowFeatureService : IDisposable
     /// </summary>
     private void EnsureCloseHook(TrackedWindow tracked)
     {
-        if (tracked.CloseHookInstalled)
+        if (tracked.CloseHookInstalled || tracked.Hwnd == 0)
             return;
 
-        Win32Properties.AddWndProcHookCallback(tracked.Window, WndProcHook);
+        if (tracked.IsNative)
+        {
+            // 原生弹窗没有 Avalonia Window 对象，用 GWLP_WNDPROC 子类化：保存原窗口过程，
+            // 消息先过保护逻辑再交还原过程；静态委托字段保证回调不被 GC 回收。
+            tracked.OriginalWndProc = GetWindowLongPtr(tracked.Hwnd, GWLP_WNDPROC);
+            SetWindowLongPtr(tracked.Hwnd, GWLP_WNDPROC, Marshal.GetFunctionPointerForDelegate(NativeWndProc));
+            tracked.CloseHookInstalled = true;
+            return;
+        }
+
+        Win32Properties.AddWndProcHookCallback(tracked.Window!, WndProcHook);
         tracked.CloseHookInstalled = true;
     }
 
@@ -411,9 +437,18 @@ public sealed partial class WindowFeatureService : IDisposable
         if (!tracked.CloseHookInstalled)
             return;
         tracked.CloseHookInstalled = false;
+
+        if (tracked.IsNative)
+        {
+            if (tracked.OriginalWndProc != nint.Zero && IsWindow(tracked.Hwnd))
+                SetWindowLongPtr(tracked.Hwnd, GWLP_WNDPROC, tracked.OriginalWndProc);
+            tracked.OriginalWndProc = nint.Zero;
+            return;
+        }
+
         try
         {
-            Win32Properties.RemoveWndProcHookCallback(tracked.Window, WndProcHook);
+            Win32Properties.RemoveWndProcHookCallback(tracked.Window!, WndProcHook);
         }
         catch (Exception exception)
         {
@@ -447,7 +482,9 @@ public sealed partial class WindowFeatureService : IDisposable
 
         foreach (var tracked in _tracked.Values)
         {
-            if (!tracked.InScope || tracked.Hwnd == 0 || !IsWindow(tracked.Hwnd))
+            // 原生弹窗是瞬态窗口（被覆盖/隐藏是正常生命周期），且没有 Avalonia 状态作
+            // 自愈基准，不参与层级恢复与自愈。
+            if (!tracked.InScope || tracked.Hwnd == 0 || !IsWindow(tracked.Hwnd) || tracked.IsNative)
                 continue;
 
             ApplySelfHeal(tracked);
@@ -477,6 +514,9 @@ public sealed partial class WindowFeatureService : IDisposable
     private void ApplySelfHeal(TrackedWindow tracked)
     {
         var window = tracked.Window;
+        if (window is null)
+            return; // 原生弹窗没有 Avalonia 状态作自愈基准。
+
         var nativeVisible = IsWindowVisible(tracked.Hwnd);
         var now = Environment.TickCount64;
 
@@ -691,6 +731,84 @@ public sealed partial class WindowFeatureService : IDisposable
         }
     }
 
+    // ---------------------------------------------------------------- 原生弹窗跟踪
+
+    /// <summary>
+    ///     同步原生弹窗保护开关状态：开启时做一次种子扫描并转为事件驱动；
+    ///     关闭时恢复特征并解除全部原生跟踪。每轮 Tick 调用，仅状态迁移时执行实际工作。
+    /// </summary>
+    private void SyncNativeProtection(HideSecRandomConfig config)
+    {
+        var nativeEnabled = config.Enabled && config.NativePopupProtection;
+        if (nativeEnabled && !_nativePopupActive)
+        {
+            _nativePopupActive = true;
+            SeedNativePopups();
+            _logger.LogInformation("原生弹窗保护已开启。");
+        }
+        else if (!nativeEnabled && _nativePopupActive)
+        {
+            _nativePopupActive = false;
+            foreach (var tracked in _tracked.Values)
+            {
+                if (!tracked.IsNative)
+                    continue;
+                ApplyCaptureExclusion(tracked, enabled: false);
+                ApplyRandomTitle(tracked, enabled: false, config);
+                ApplyToolwindowDisguise(tracked, enabled: false);
+                DetachNativePopup(tracked);
+            }
+            _logger.LogInformation("原生弹窗保护已关闭。");
+        }
+    }
+
+    /// <summary>一次性枚举本进程顶层窗口，把已存在的 WS_POPUP 弹窗纳入跟踪；后续交给事件驱动。</summary>
+    private void SeedNativePopups() => EnumWindows(SeedScanProc, nint.Zero);
+
+    private static readonly NativeMethods.EnumWindowsProc SeedScanProc = (hwnd, _) =>
+    {
+        Instance?.TryTrackNativePopup(hwnd);
+        return true;
+    };
+
+    /// <summary>
+    ///     跟踪单个本进程 WS_POPUP 顶层弹窗；跟踪后立即子类化挂钩。仅跟踪本进程、
+    ///     非子窗口（EnumWindows 只列顶层）。探测路径极轻（ContainsKey 短路 + 样式位读取），
+    ///     供 WinEvent 创建/显示回调在节流之前直接调用。
+    /// </summary>
+    private bool TryTrackNativePopup(nint hwnd)
+    {
+        if (!_nativePopupActive || hwnd == nint.Zero || _tracked.ContainsKey(hwnd))
+            return false;
+        _ = GetWindowThreadProcessId(hwnd, out var processId);
+        if (processId != (uint)Environment.ProcessId)
+            return false;
+
+        var style = (uint)GetWindowLongPtr(hwnd, GWL_STYLE);
+        if ((style & WS_POPUP) == 0 || (style & WS_CHILD) != 0)
+            return false;
+
+        var tracked = new TrackedWindow { Hwnd = hwnd, IsPopup = true, IsNative = true };
+        _tracked[hwnd] = tracked;
+        try
+        {
+            EnsureCloseHook(tracked);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "子类化原生弹窗失败（HWND {Hwnd}）。", hwnd);
+        }
+        _logger.LogDebug("跟踪原生弹窗（HWND {Hwnd}）。", hwnd);
+        return true;
+    }
+
+    /// <summary>原生弹窗窗口销毁（WM_NCDESTROY）时解除跟踪并还原窗口过程。</summary>
+    private void DetachNativePopup(TrackedWindow tracked)
+    {
+        if (_tracked.TryRemove(tracked.Hwnd, out _))
+            UnhookClose(tracked);
+    }
+
     // ---------------------------------------------------------------- WinEvent 与 WM_CLOSE 钩子
 
     /// <summary>
@@ -713,13 +831,44 @@ public sealed partial class WindowFeatureService : IDisposable
 
     private static readonly WinEventDelegate WinEventProc = OnWinEvent;
     private static readonly Win32Properties.CustomWndProcHookCallback WndProcHook = OnWndProcHook;
+    private static readonly NativeMethods.WndProcDelegate NativeWndProc = OnNativeWndProc;
+
+    /// <summary>
+    ///     原生弹窗的子类化窗口过程：销毁时解除跟踪并还原，其余消息先过保护逻辑
+    ///     （<see cref="OnWndProcHook"/>），未被吞掉的一律交还原窗口过程。
+    /// </summary>
+    private static nint OnNativeWndProc(nint hwnd, uint msg, nint wParam, nint lParam)
+    {
+        var instance = Instance;
+        if (instance is null || !instance._tracked.TryGetValue(hwnd, out var tracked))
+            return DefWindowProcW(hwnd, msg, wParam, lParam);
+
+        try
+        {
+            if (msg == WM_NCDESTROY)
+                instance.DetachNativePopup(tracked);
+
+            var handled = false;
+            _ = OnWndProcHook(hwnd, msg, wParam, lParam, ref handled);
+            if (handled)
+                return nint.Zero;
+        }
+        catch
+        {
+            // 窗口消息回调绝不允许把托管异常抛进消息循环。
+        }
+        return CallWindowProc(tracked.OriginalWndProc, hwnd, msg, wParam, lParam);
+    }
 
     private void InstallWinEventHooks()
     {
-        foreach (var eventType in (uint[])[EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, EVENT_OBJECT_REORDER])
+        // idProcess 限定为本进程：钩子用途（自愈覆盖检查、新弹窗即时跟踪）只关心本进程
+        // 窗口，限定后系统里其它进程的事件不会派发进本进程 UI 线程，避免全局钩子的
+        // 无谓回调开销。
+        foreach (var eventType in (uint[])[EVENT_SYSTEM_FOREGROUND, EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW, EVENT_OBJECT_HIDE, EVENT_OBJECT_REORDER])
         {
             var hook = SetWinEventHook(
-                eventType, eventType, nint.Zero, WinEventProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+                eventType, eventType, nint.Zero, WinEventProc, (uint)Environment.ProcessId, 0, WINEVENT_OUTOFCONTEXT);
             if (hook != nint.Zero)
                 _winEventHooks.Add(hook);
         }
@@ -734,6 +883,12 @@ public sealed partial class WindowFeatureService : IDisposable
 
         try
         {
+            // 新弹窗创建/显示（下拉框、Flyout、文件选择器、隐藏的弹窗属主 PhonyRootWindow 等）：
+            // 立即跟踪并挂钩。必须在节流之前执行——节流可能恰好丢弃这次事件，
+            // 而跟踪本身有 ContainsKey/样式位短路，代价远小于节流间隔。
+            if ((eventType == EVENT_OBJECT_CREATE || eventType == EVENT_OBJECT_SHOW) && hwnd != nint.Zero)
+                instance.TryTrackNativePopup(hwnd);
+
             var now = Environment.TickCount64;
             var last = Interlocked.Read(ref instance._lastEventFixTicks);
             if (now - last < EventThrottleMilliseconds)

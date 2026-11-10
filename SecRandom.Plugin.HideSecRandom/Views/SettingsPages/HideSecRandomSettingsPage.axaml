@@ -183,6 +183,15 @@
                 </fa:FASettingsExpander.Footer>
             </fa:FASettingsExpander>
 
+            <fa:FASettingsExpander x:Name="S_NativePopup"
+                                   Header="{x:Static loc:Strings.S_NativePopup}"
+                                   Description="{x:Static loc:Strings.S_NativePopup_D}"
+                                   IconSource="{sr:FluentIconSource {sr:Fi CursorHoverFilled}}">
+                <fa:FASettingsExpander.Footer>
+                    <ToggleSwitch IsChecked="{Binding Settings.NativePopupProtection}" />
+                </fa:FASettingsExpander.Footer>
+            </fa:FASettingsExpander>
+
         </StackPanel>
     </ScrollViewer>
 </UserControl>
