@@ -32,6 +32,8 @@ public sealed partial class WindowFeatureService : IDisposable
     private const long ProgrammaticCloseGraceMilliseconds = 5000;
     /// <summary>外部隐藏后的恢复延迟：必须大于强制关窗动作链从隐藏到结束进程判定的全部耗时（Sleep(200)+微秒级检查）。</summary>
     private const long HideRestoreDelayMilliseconds = 400;
+    /// <summary>自愈复查的到期余量：确保抑制期结束后再执行恢复检查。</summary>
+    private const long HealRecheckMarginMilliseconds = 100;
     private static readonly object InstanceGate = new();
     private static WindowFeatureService? _instance;
 
@@ -41,6 +43,7 @@ public sealed partial class WindowFeatureService : IDisposable
     private readonly List<nint> _winEventHooks = [];
 
     private DispatcherTimer? _timer;
+    private DispatcherTimer? _healRecheckTimer;
     private volatile bool _active;
     private volatile bool _blockWmCloseActive;
     private volatile bool _blockForceCloseActive;
@@ -92,6 +95,8 @@ public sealed partial class WindowFeatureService : IDisposable
         {
             _timer?.Stop();
             _timer = null;
+            _healRecheckTimer?.Stop();
+            _healRecheckTimer = null;
             foreach (var hook in _winEventHooks)
                 UnhookWinEvent(hook);
             _winEventHooks.Clear();
@@ -535,7 +540,10 @@ public sealed partial class WindowFeatureService : IDisposable
         else if (!nativeVisible)
         {
             if (tracked.SuppressRestoreUntilTicks == 0)
+            {
                 tracked.SuppressRestoreUntilTicks = now + HideRestoreDelayMilliseconds;
+                ScheduleHealRecheck(HideRestoreDelayMilliseconds);
+            }
         }
         else
         {
@@ -583,7 +591,10 @@ public sealed partial class WindowFeatureService : IDisposable
             && !IntersectsAnyMonitor(tracked.Hwnd))
         {
             if (tracked.SuppressPositionRestoreUntilTicks == 0)
+            {
                 tracked.SuppressPositionRestoreUntilTicks = now + HideRestoreDelayMilliseconds;
+                ScheduleHealRecheck(HideRestoreDelayMilliseconds);
+            }
         }
         else
         {
@@ -623,6 +634,55 @@ public sealed partial class WindowFeatureService : IDisposable
         tracked.LastGoodRight = rect.Right;
         tracked.LastGoodBottom = rect.Bottom;
         tracked.LastGoodTopmost = (GetWindowLongPtr(tracked.Hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
+    }
+
+    /// <summary>
+    ///     调度一次自愈复查：让“被外部隐藏/移出屏幕”的延迟恢复在抑制期结束后立即执行，
+    ///     而不是等兜底轮询。一次性定时器，事件调度而非轮询；若已有待触发的复查则沿用，
+    ///     其触发后会按剩余抑制期续排。
+    /// </summary>
+    private void ScheduleHealRecheck(long delayMilliseconds)
+    {
+        if (_healRecheckTimer is not null)
+            return;
+        var timer = new DispatcherTimer(
+            TimeSpan.FromMilliseconds(delayMilliseconds + HealRecheckMarginMilliseconds),
+            DispatcherPriority.Background,
+            OnHealRecheck);
+        _healRecheckTimer = timer;
+        timer.Start();
+    }
+
+    private void OnHealRecheck(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (sender is DispatcherTimer timer)
+            {
+                timer.Stop();
+                if (ReferenceEquals(_healRecheckTimer, timer))
+                    _healRecheckTimer = null;
+            }
+
+            EnforceTopOrder();
+            RescheduleHealRecheckIfSuppressed();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "自愈复查失败。");
+        }
+    }
+
+    /// <summary>复查后若仍有窗口处于抑制期（多个窗口先后被压制），按最晚到期时间续排复查。</summary>
+    private void RescheduleHealRecheckIfSuppressed()
+    {
+        var now = Environment.TickCount64;
+        long latest = 0;
+        foreach (var tracked in _tracked.Values)
+            latest = Math.Max(latest,
+                Math.Max(tracked.SuppressRestoreUntilTicks, tracked.SuppressPositionRestoreUntilTicks));
+        if (latest > now)
+            ScheduleHealRecheck(latest - now);
     }
 
     private static bool IntersectsAnyMonitor(nint hwnd)
