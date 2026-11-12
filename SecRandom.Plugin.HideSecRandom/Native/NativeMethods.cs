@@ -9,6 +9,7 @@ internal static class NativeMethods
     public const int GWL_STYLE = -16;
     public const int GWLP_WNDPROC = -4;
     public const int WS_SYSMENU = 0x00080000;
+    public const int WS_CAPTION = 0x00C00000;
     public const uint WS_POPUP = 0x80000000;
     public const uint WS_CHILD = 0x40000000;
     public const int WS_EX_TOOLWINDOW = 0x00000080;
@@ -176,6 +177,16 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     public static extern int GetWindowTextLength(nint hWnd);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern int GetClassNameW(nint hWnd, [Out] char[] lpClassName, int nMaxCount);
+
+    public static string GetWindowClass(nint hWnd)
+    {
+        var buffer = new char[256];
+        var length = GetClassNameW(hWnd, buffer, buffer.Length);
+        return length > 0 ? new string(buffer, 0, length) : string.Empty;
+    }
 
     public static string GetWindowText(nint hWnd)
     {

@@ -32,6 +32,8 @@ public sealed partial class WindowFeatureService : IDisposable
     private const long ProgrammaticCloseGraceMilliseconds = 5000;
     /// <summary>外部隐藏后的恢复延迟：必须大于强制关窗动作链从隐藏到结束进程判定的全部耗时（Sleep(200)+微秒级检查）。</summary>
     private const long HideRestoreDelayMilliseconds = 400;
+    /// <summary>观察到强制关窗动作后的对抗窗口期：拦截链的隐藏/移出屏幕步骤都发生在其后的数百毫秒内。</summary>
+    private const long ForcedCloseMarkerMilliseconds = 2000;
     /// <summary>自愈复查的到期余量：确保抑制期结束后再执行恢复检查。</summary>
     private const long HealRecheckMarginMilliseconds = 100;
     private static readonly object InstanceGate = new();
@@ -226,7 +228,7 @@ public sealed partial class WindowFeatureService : IDisposable
 
     private void ApplyCaptureExclusion(TrackedWindow tracked, bool enabled)
     {
-        if (enabled && !tracked.CaptureExclusionApplied)
+        if (enabled && !tracked.CaptureExclusionApplied && !tracked.CaptureExclusionFailed)
         {
             // WDA_EXCLUDEFROMCAPTURE（Win10 2004+）：屏幕共享与常规捕获 API 中完全不可见。
             if (SetWindowDisplayAffinity(tracked.Hwnd, WDA_EXCLUDEFROMCAPTURE))
@@ -235,14 +237,19 @@ public sealed partial class WindowFeatureService : IDisposable
             }
             else
             {
-                _logger.LogWarning("SetWindowDisplayAffinity 失败（错误代码 {Error}），窗口保持可捕获。",
-                    Marshal.GetLastWin32Error());
+                // 部分本进程窗口（IME 窗口、离屏属主 PhonyRootWindow 等）不支持 WDA
+                // （错误 87）：标记失败并停止重试，避免每轮 Tick 重试刷日志。
+                tracked.CaptureExclusionFailed = true;
+                _logger.LogWarning(
+                    "SetWindowDisplayAffinity 失败（错误代码 {Error}，HWND {Hwnd}，类名 {Class}），跳过该窗口的防捕获。",
+                    Marshal.GetLastWin32Error(), tracked.Hwnd, NativeMethods.GetWindowClass(tracked.Hwnd));
             }
         }
         else if (!enabled && tracked.CaptureExclusionApplied)
         {
             SetWindowDisplayAffinity(tracked.Hwnd, WDA_NONE);
             tracked.CaptureExclusionApplied = false;
+            tracked.CaptureExclusionFailed = false;
         }
     }
 
@@ -488,7 +495,22 @@ public sealed partial class WindowFeatureService : IDisposable
 
     private void EnforceTopOrder()
     {
-        if (!_configHandler.Data.Enabled || !_configHandler.Data.KeepOnTop)
+        if (!_configHandler.Data.Enabled)
+            return;
+
+        // 原生弹窗的强制关窗自愈独立于 KeepOnTop：拦截链吞掉 SC_CLOSE 后的隐藏/移出屏幕
+        // 步骤需要恢复，否则文件选择器等对话框被隐藏后无法自行回来。
+        if (_nativePopupActive)
+        {
+            var now = Environment.TickCount64;
+            foreach (var tracked in _tracked.Values)
+            {
+                if (tracked.IsNative && tracked.InScope && tracked.Hwnd != 0 && IsWindow(tracked.Hwnd))
+                    ApplyNativeSelfHeal(tracked, now);
+            }
+        }
+
+        if (!_configHandler.Data.KeepOnTop)
             return;
 
         foreach (var tracked in _tracked.Values)
@@ -510,6 +532,76 @@ public sealed partial class WindowFeatureService : IDisposable
             if (BringWindowToTopOfOrder(tracked.Hwnd))
                 _logger.LogDebug("检测到窗口被覆盖，已恢复到顶层（HWND {Hwnd}）。", tracked.Hwnd);
         }
+    }
+
+    /// <summary>
+    ///     原生弹窗的强制关窗自愈，仅在强制关窗标记期内介入：
+    ///     - 被外部隐藏：延迟恢复显示（语义同 Avalonia 窗口的隐藏恢复抑制——先让拦截链的
+    ///       可见性判定成立，避免其升级结束进程）；
+    ///     - 被移出屏幕：等强制关窗标记过期（拦截链确认“已移出屏幕”并结束动作序列）后送回原位；
+    ///     - 被外部禁用：立即恢复。
+    ///     菜单/悬浮提示等瞬态弹窗正常的显示与隐藏不携带强制关窗标记，不会被误恢复。
+    /// </summary>
+    private void ApplyNativeSelfHeal(TrackedWindow tracked, long now)
+    {
+        if (now > tracked.ForcedCloseSeenUntilTicks)
+        {
+            tracked.SuppressNativeRestoreUntilTicks = 0;
+            tracked.SuppressNativePositionRestoreUntilTicks = 0;
+            return;
+        }
+
+        if (!IsWindowEnabled(tracked.Hwnd))
+        {
+            EnableWindow(tracked.Hwnd, true);
+            _logger.LogInformation("检测到原生弹窗被外部禁用，已恢复（HWND {Hwnd}）。", tracked.Hwnd);
+        }
+
+        if (!IsWindowVisible(tracked.Hwnd))
+        {
+            if (tracked.SuppressNativeRestoreUntilTicks == 0)
+            {
+                tracked.SuppressNativeRestoreUntilTicks = now + HideRestoreDelayMilliseconds;
+                ScheduleHealRecheck(HideRestoreDelayMilliseconds);
+            }
+            else if (now >= tracked.SuppressNativeRestoreUntilTicks)
+            {
+                ShowWindow(tracked.Hwnd, SW_SHOW);
+                tracked.SuppressNativeRestoreUntilTicks = 0;
+                _logger.LogInformation("检测到原生弹窗被外部隐藏，已恢复显示（HWND {Hwnd}）。", tracked.Hwnd);
+            }
+            return;
+        }
+
+        tracked.SuppressNativeRestoreUntilTicks = 0;
+
+        if (!tracked.HasLastGoodRect || IntersectsAnyMonitor(tracked.Hwnd))
+        {
+            // 在屏幕内的正常状态：刷新原位基线（UpdateLastGoodRect 不会记录屏幕外矩形）。
+            tracked.SuppressNativePositionRestoreUntilTicks = 0;
+            UpdateLastGoodRect(tracked);
+            return;
+        }
+
+        if (tracked.SuppressNativePositionRestoreUntilTicks == 0)
+        {
+            // 等强制关窗标记过期（拦截链已确认“已移出屏幕”并结束动作序列）后再送回原位。
+            tracked.SuppressNativePositionRestoreUntilTicks =
+                tracked.ForcedCloseSeenUntilTicks + HealRecheckMarginMilliseconds;
+            ScheduleHealRecheck(tracked.SuppressNativePositionRestoreUntilTicks - now);
+            return;
+        }
+
+        if (now < tracked.SuppressNativePositionRestoreUntilTicks)
+            return;
+
+        SetWindowPos(tracked.Hwnd, nint.Zero,
+            tracked.LastGoodLeft, tracked.LastGoodTop,
+            tracked.LastGoodRight - tracked.LastGoodLeft,
+            tracked.LastGoodBottom - tracked.LastGoodTop,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+        tracked.SuppressNativePositionRestoreUntilTicks = 0;
+        _logger.LogInformation("检测到原生弹窗被移出屏幕，已恢复位置（HWND {Hwnd}）。", tracked.Hwnd);
     }
 
     /// <summary>
@@ -679,8 +771,12 @@ public sealed partial class WindowFeatureService : IDisposable
         var now = Environment.TickCount64;
         long latest = 0;
         foreach (var tracked in _tracked.Values)
-            latest = Math.Max(latest,
-                Math.Max(tracked.SuppressRestoreUntilTicks, tracked.SuppressPositionRestoreUntilTicks));
+        {
+            latest = Math.Max(latest, tracked.SuppressRestoreUntilTicks);
+            latest = Math.Max(latest, tracked.SuppressPositionRestoreUntilTicks);
+            latest = Math.Max(latest, tracked.SuppressNativeRestoreUntilTicks);
+            latest = Math.Max(latest, tracked.SuppressNativePositionRestoreUntilTicks);
+        }
         if (latest > now)
             ScheduleHealRecheck(latest - now);
     }
@@ -864,7 +960,19 @@ public sealed partial class WindowFeatureService : IDisposable
         {
             _logger.LogWarning(exception, "子类化原生弹窗失败（HWND {Hwnd}）。", hwnd);
         }
-        _logger.LogDebug("跟踪原生弹窗（HWND {Hwnd}）。", hwnd);
+
+        // 带标题栏的原生弹窗（文件选择器等对话框）是需要重点确认保护的对象，升为
+        // Information 级记录类名与标题；其余（菜单/悬浮提示宿主、离屏属主、IME）保持 Debug。
+        if ((style & WS_CAPTION) != 0)
+        {
+            _logger.LogInformation(
+                "跟踪带标题栏的原生弹窗（HWND {Hwnd}，类名 {Class}，标题 {Title}）。",
+                hwnd, NativeMethods.GetWindowClass(hwnd), GetWindowText(hwnd));
+        }
+        else
+        {
+            _logger.LogDebug("跟踪原生弹窗（HWND {Hwnd}）。", hwnd);
+        }
         return true;
     }
 
@@ -1057,6 +1165,9 @@ public sealed partial class WindowFeatureService : IDisposable
                         var hasSysMenu = (GetWindowLongPtr(hwnd, GWL_STYLE) & WS_SYSMENU) != 0;
                         if (instance._blockForceCloseActive && (!hasSysMenu || lParam == nint.Zero))
                         {
+                            // 记录强制关窗标记：拦截链随后的 ShowWindow(SW_HIDE) 独立于压底签名，
+                            // 期内予以拒绝（见 WM_WINDOWPOSCHANGING）。
+                            tracked.ForcedCloseSeenUntilTicks = Environment.TickCount64 + ForcedCloseMarkerMilliseconds;
                             handled = true;
                             return nint.Zero;
                         }
@@ -1077,8 +1188,20 @@ public sealed partial class WindowFeatureService : IDisposable
                         var isForcedClose = pos.HwndInsertAfter == HWND_BOTTOM;
                         var modified = false;
 
+                        // 强制关窗动作链的“隐藏”一步是不带压底签名的 ShowWindow(SW_HIDE)
+                        // （表现为 SWP_HIDEWINDOW 但插入方不是 HWND_BOTTOM），此前放行导致
+                        // 窗口被隐藏后消失（文件选择器等原生弹窗没有 Avalonia 自愈兜底）。
+                        // 在强制关窗标记期内（刚吞掉 SC_CLOSE 或见过压底签名）一律拒绝隐藏。
+                        if ((pos.Flags & SWP_HIDEWINDOW) != 0
+                            && Environment.TickCount64 < tracked.ForcedCloseSeenUntilTicks)
+                        {
+                            pos.Flags &= ~SWP_HIDEWINDOW;
+                            modified = true;
+                        }
+
                         if (isForcedClose)
                         {
+                            tracked.ForcedCloseSeenUntilTicks = Environment.TickCount64 + ForcedCloseMarkerMilliseconds;
                             pos.Flags &= ~SWP_HIDEWINDOW; // 拒绝隐藏
                             pos.Flags |= SWP_NOZORDER;    // 拒绝压底，保持当前层带
                             modified = true;

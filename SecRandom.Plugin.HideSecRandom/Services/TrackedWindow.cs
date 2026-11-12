@@ -26,6 +26,9 @@ internal sealed class TrackedWindow
     // 防捕获
     public bool CaptureExclusionApplied { get; set; }
 
+    /// <summary>该窗口不支持 WDA（错误 87 等）：不再重试，避免每轮 Tick 重试刷日志。</summary>
+    public bool CaptureExclusionFailed { get; set; }
+
     // 随机窗口名称
     public string? OriginalTitle { get; set; }
     public string? RandomTitle { get; set; }
@@ -49,6 +52,19 @@ internal sealed class TrackedWindow
 
     /// <summary>Avalonia 触发 Closing（程序化或用户关闭路径）后的放行截止时刻；一次性使用。</summary>
     public long ProgrammaticCloseTicks { get; set; }
+
+    /// <summary>
+    ///     最近一次观察到强制关窗动作（SC_CLOSE 投递或 HWND_BOTTOM 压底签名）的放行截止时刻
+    ///     （TickCount64 毫秒）。期内拒绝独立于压底签名的外部隐藏（拦截链的 ShowWindow(SW_HIDE)
+    ///     一步），并允许原生弹窗的可见性/位置自愈介入。
+    /// </summary>
+    public long ForcedCloseSeenUntilTicks { get; set; }
+
+    /// <summary>原生弹窗可见性恢复抑制截止时刻（TickCount64 毫秒），语义同 Avalonia 窗口的隐藏恢复抑制。</summary>
+    public long SuppressNativeRestoreUntilTicks { get; set; }
+
+    /// <summary>原生弹窗位置恢复抑制截止时刻（TickCount64 毫秒）：等强制关窗动作链确认“已移出屏幕”后再送回。</summary>
+    public long SuppressNativePositionRestoreUntilTicks { get; set; }
 
     /// <summary>
     ///     检测到外部隐藏后的恢复抑制截止时刻（TickCount64 毫秒）。
