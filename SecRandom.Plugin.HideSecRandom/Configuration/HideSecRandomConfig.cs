@@ -50,12 +50,12 @@ public partial class HideSecRandomConfig : ConfigBase
     [ObservableProperty] private bool _toolwindowDisguise = true;
 
     /// <summary>
-    ///     作用范围扩展：<c>false</c> 时功能仅作用于无边框弹出窗口（悬浮窗、快速抽奖窗口等），
-    ///     <c>true</c> 时扩展到本软件全部顶层窗口（主窗口、设置窗口等）。
+    ///     作用范围扩展：默认 <c>true</c>，功能作用于本软件全部顶层窗口（主窗口、设置窗口等）；
+    ///     关闭后仅作用于无边框弹出窗口（悬浮窗、快速抽奖窗口等）。
     ///     开启后随机窗口名称也会作用于带标题栏窗口：其可见标题栏文字（含任务栏、Alt+Tab）
     ///     将变为随机字符串。
     /// </summary>
-    [ObservableProperty] private bool _includeAllWindows;
+    [ObservableProperty] private bool _includeAllWindows = true;
 
     /// <summary>
     ///     原生弹窗保护：下拉框（ComboBox）、Flyout、右键菜单、悬浮提示以及系统文件选择器
